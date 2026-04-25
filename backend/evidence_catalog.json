@@ -1,0 +1,517 @@
+{
+  "catalog_version": "fogline-evidence-cards-v1",
+  "description": "Local structured evidence/RAG catalog for fictional, unclassified training and exercise planning. The catalog uses qualitative pattern cards and does not claim precise statistical failure rates.",
+  "pattern_cards": [
+    {
+      "id": "partner_support_stability",
+      "category": "partner_support",
+      "description": "Assumptions that external partners, hosts, civil authorities, or supporting organizations remain aligned and available.",
+      "risk_factors": [
+        "partner priorities can shift under pressure",
+        "support may be delayed by approval or capacity limits",
+        "coordination paths can become unclear when conditions change"
+      ],
+      "observable_indicators": [
+        "late partner confirmation",
+        "changed partner constraint",
+        "unresolved coordination request",
+        "conflicting guidance from supporting actors"
+      ],
+      "mitigation_patterns": [
+        "add partner alignment checkpoints",
+        "name a liaison or coordination owner",
+        "define a reduced-scope branch if support is delayed",
+        "record fallback coordination paths"
+      ],
+      "base_fragility": 71,
+      "safe_historical_analog_summary": "Coalition plans often face political availability shifts.",
+      "doctrine_note": "Assumptions require validation, and plans should include branches or sequels when partner support changes.",
+      "rag_keywords": [
+        "partner",
+        "coalition",
+        "host",
+        "agency",
+        "stakeholder",
+        "support",
+        "liaison",
+        "civil",
+        "coordination"
+      ]
+    },
+    {
+      "id": "logistics_continuity",
+      "category": "logistics",
+      "description": "Assumptions that movement, sustainment, maintenance, staging, and distribution remain continuous enough for the plan.",
+      "risk_factors": [
+        "movement capacity may be overestimated",
+        "staging or distribution nodes may become constrained",
+        "maintenance and replenishment timing may lag demand"
+      ],
+      "observable_indicators": [
+        "delayed movement update",
+        "resource shortfall notice",
+        "maintenance backlog",
+        "staging area congestion"
+      ],
+      "mitigation_patterns": [
+        "identify reserve capacity",
+        "prioritize critical sustainment needs",
+        "predefine alternate staging",
+        "set reroute or reduce-scope triggers"
+      ],
+      "base_fragility": 75,
+      "safe_historical_analog_summary": "Logistics assumptions can fail when routes, timing, or infrastructure are unverified.",
+      "doctrine_note": "Operating environments change, so logistics assumptions require active monitoring and branch options.",
+      "rag_keywords": [
+        "logistics",
+        "supply",
+        "transport",
+        "maintenance",
+        "fuel",
+        "staging",
+        "distribution",
+        "route",
+        "harbor",
+        "port"
+      ]
+    },
+    {
+      "id": "communications_integrity",
+      "category": "communications",
+      "description": "Assumptions that communications paths, reports, and shared updates remain timely, accurate, and usable.",
+      "risk_factors": [
+        "communication paths may degrade or become congested",
+        "shared understanding can lag actual conditions",
+        "missed reports can hide assumption failure"
+      ],
+      "observable_indicators": [
+        "missed update window",
+        "stale shared picture",
+        "conflicting status reports",
+        "backup channel activation"
+      ],
+      "mitigation_patterns": [
+        "add alternate communication paths",
+        "create brief check-in windows",
+        "predefine degraded-update formats",
+        "tie missed reports to validation actions"
+      ],
+      "base_fragility": 72,
+      "safe_historical_analog_summary": "Communications assumptions are fragile under degraded or contested environments.",
+      "doctrine_note": "Commanders need updated information requirements, and uncertainty must be actively monitored.",
+      "rag_keywords": [
+        "communication",
+        "communications",
+        "comms",
+        "network",
+        "radio",
+        "link",
+        "message",
+        "report",
+        "shared picture"
+      ]
+    },
+    {
+      "id": "intelligence_reliability",
+      "category": "intelligence",
+      "description": "Assumptions that estimates, forecasts, status reports, and pattern recognition remain reliable enough for decisions.",
+      "risk_factors": [
+        "information may be stale or incomplete",
+        "initial estimates may not reflect changing conditions",
+        "decision patterns can be biased by familiar but wrong cues"
+      ],
+      "observable_indicators": [
+        "conflicting estimates",
+        "unverified status report",
+        "late information update",
+        "new anomaly against the current estimate"
+      ],
+      "mitigation_patterns": [
+        "mark confidence levels",
+        "set an update cadence",
+        "run challenge reviews on key estimates",
+        "define conservative decision branches"
+      ],
+      "base_fragility": 69,
+      "safe_historical_analog_summary": "Plans can degrade when early estimates are treated as fixed facts.",
+      "doctrine_note": "Assumptions require validation, and commanders need updated information requirements as conditions change.",
+      "rag_keywords": [
+        "intelligence",
+        "information",
+        "estimate",
+        "forecast",
+        "assessment",
+        "status",
+        "picture",
+        "known",
+        "unknown",
+        "verify"
+      ]
+    },
+    {
+      "id": "civilian_behavior_predictability",
+      "category": "civilian_behavior",
+      "description": "Assumptions that civilian movement, compliance, demand, or public response remains predictable.",
+      "risk_factors": [
+        "civilian behavior may change quickly under stress",
+        "public demand can exceed expected coordination capacity",
+        "rumors or uncertainty can alter movement patterns"
+      ],
+      "observable_indicators": [
+        "unexpected crowding",
+        "changed civil access demand",
+        "public messaging confusion",
+        "late civil authority update"
+      ],
+      "mitigation_patterns": [
+        "coordinate with civil authorities",
+        "monitor demand indicators",
+        "prepare reduced-scope access options",
+        "set public information update checkpoints"
+      ],
+      "base_fragility": 66,
+      "safe_historical_analog_summary": "Civil behavior assumptions can shift when information, access, or perceived risk changes.",
+      "doctrine_note": "Operating environments change, and uncertainty about civilian behavior must be actively monitored.",
+      "rag_keywords": [
+        "civilian",
+        "civil",
+        "population",
+        "crowd",
+        "public",
+        "evacuation",
+        "access",
+        "demand",
+        "compliance"
+      ]
+    },
+    {
+      "id": "infrastructure_availability",
+      "category": "infrastructure",
+      "description": "Assumptions that ports, routes, power, facilities, bridges, or other infrastructure remain usable.",
+      "risk_factors": [
+        "single infrastructure nodes can constrain the whole plan",
+        "facility status may be unverified",
+        "infrastructure capacity can degrade under load"
+      ],
+      "observable_indicators": [
+        "route status change",
+        "facility capacity warning",
+        "access queue growth",
+        "power or service interruption notice"
+      ],
+      "mitigation_patterns": [
+        "identify alternate infrastructure",
+        "monitor capacity thresholds",
+        "define reroute triggers",
+        "stage only critical tasks through constrained nodes"
+      ],
+      "base_fragility": 73,
+      "safe_historical_analog_summary": "Infrastructure assumptions often fail when capacity, access, or status is not validated.",
+      "doctrine_note": "Plans should include branches or sequels when infrastructure availability changes.",
+      "rag_keywords": [
+        "infrastructure",
+        "route",
+        "bridge",
+        "port",
+        "harbor",
+        "facility",
+        "power",
+        "road",
+        "access",
+        "checkpoint"
+      ]
+    },
+    {
+      "id": "weather_environment_stability",
+      "category": "weather_environment",
+      "description": "Assumptions that weather, terrain, sea state, visibility, or environmental limits remain acceptable.",
+      "risk_factors": [
+        "environmental conditions can change faster than planning cycles",
+        "movement or visibility may degrade",
+        "condition thresholds may be undefined"
+      ],
+      "observable_indicators": [
+        "condition threshold crossed",
+        "visibility update",
+        "route or sea-state warning",
+        "forecast confidence change"
+      ],
+      "mitigation_patterns": [
+        "define condition thresholds",
+        "prepare alternate timing",
+        "monitor route and visibility status",
+        "reduce exposed tasks when thresholds are crossed"
+      ],
+      "base_fragility": 64,
+      "safe_historical_analog_summary": "Weather and environmental assumptions can degrade timing, movement, and observation.",
+      "doctrine_note": "Operating environments change, and uncertainty must be actively monitored.",
+      "rag_keywords": [
+        "weather",
+        "environment",
+        "terrain",
+        "visibility",
+        "storm",
+        "tide",
+        "sea",
+        "road",
+        "route",
+        "forecast"
+      ]
+    },
+    {
+      "id": "cyber_system_availability",
+      "category": "cyber_system",
+      "description": "Assumptions that digital systems, networks, data services, and decision tools remain available and trustworthy.",
+      "risk_factors": [
+        "system access can degrade without visible physical disruption",
+        "data services may become stale or unavailable",
+        "manual fallbacks may be slower than expected"
+      ],
+      "observable_indicators": [
+        "system latency or outage",
+        "stale dashboard data",
+        "authentication or access failure",
+        "manual reporting fallback started"
+      ],
+      "mitigation_patterns": [
+        "prepare manual reporting paths",
+        "define minimum data needed for decisions",
+        "add system health checks",
+        "create reduced-digital workflow branches"
+      ],
+      "base_fragility": 70,
+      "safe_historical_analog_summary": "Digital availability assumptions can fail when system health and manual alternatives are untested.",
+      "doctrine_note": "Commanders need updated information requirements, and assumptions about systems require validation.",
+      "rag_keywords": [
+        "cyber",
+        "system",
+        "network",
+        "dashboard",
+        "data",
+        "software",
+        "access",
+        "authentication",
+        "outage",
+        "digital"
+      ]
+    },
+    {
+      "id": "timing_synchronization",
+      "category": "timing",
+      "description": "Assumptions that phases, handoffs, windows, and sequencing stay synchronized across actors and dependencies.",
+      "risk_factors": [
+        "small delays can cascade across phases",
+        "parallel tasks may require precise handoffs",
+        "compressed decision windows reduce adaptation time"
+      ],
+      "observable_indicators": [
+        "missed phase gate",
+        "late readiness report",
+        "compressed decision window",
+        "handoff not confirmed"
+      ],
+      "mitigation_patterns": [
+        "add phase gate checks",
+        "define delay thresholds",
+        "preplan resequencing",
+        "hold slack for critical handoffs"
+      ],
+      "base_fragility": 70,
+      "safe_historical_analog_summary": "Timing assumptions can fail when synchronization depends on unverified readiness.",
+      "doctrine_note": "Plans should include branches or sequels, and uncertainty must be actively monitored at decision points.",
+      "rag_keywords": [
+        "timing",
+        "timeline",
+        "schedule",
+        "window",
+        "phase",
+        "handoff",
+        "before",
+        "after",
+        "simultaneous",
+        "sync"
+      ]
+    },
+    {
+      "id": "escalation_containment",
+      "category": "escalation",
+      "description": "Assumptions that stress, disruption, or misunderstanding remains contained and does not force broader changes.",
+      "risk_factors": [
+        "local friction can spread across connected tasks",
+        "misread signals can increase coordination burden",
+        "containment boundaries may be informal or untested"
+      ],
+      "observable_indicators": [
+        "unexpected stakeholder reaction",
+        "new restriction or constraint",
+        "increased coordination requests",
+        "decision authority asks for review"
+      ],
+      "mitigation_patterns": [
+        "define containment thresholds",
+        "add coordination review points",
+        "prepare de-escalation messaging",
+        "reduce scope when uncertainty expands"
+      ],
+      "base_fragility": 68,
+      "safe_historical_analog_summary": "Plans can become brittle when local friction spreads faster than coordination can adapt.",
+      "doctrine_note": "Operating environments change, so commanders need updated information requirements and branch options.",
+      "rag_keywords": [
+        "escalation",
+        "contain",
+        "constraint",
+        "reaction",
+        "signal",
+        "friction",
+        "misunderstanding",
+        "review",
+        "scope"
+      ]
+    },
+    {
+      "id": "authority_and_permissions",
+      "category": "authority_permissions",
+      "description": "Assumptions that authorities, approvals, permissions, and policy constraints remain aligned with plan timing.",
+      "risk_factors": [
+        "approval timing can block otherwise ready tasks",
+        "permissions can change as conditions evolve",
+        "authority owner may be unclear"
+      ],
+      "observable_indicators": [
+        "approval delay",
+        "changed policy constraint",
+        "unresolved authority question",
+        "permission not confirmed before a phase gate"
+      ],
+      "mitigation_patterns": [
+        "add approval checkpoints",
+        "record authority owner",
+        "predefine reduced-scope approved options",
+        "route decisions through validated permission paths"
+      ],
+      "base_fragility": 67,
+      "safe_historical_analog_summary": "Permission assumptions can delay plans when authority and timing are not validated.",
+      "doctrine_note": "Assumptions require validation, and plans should include branches or sequels for delayed permissions.",
+      "rag_keywords": [
+        "authority",
+        "approval",
+        "permission",
+        "clearance",
+        "authorization",
+        "policy",
+        "legal",
+        "host",
+        "restriction"
+      ]
+    },
+    {
+      "id": "resource_sufficiency",
+      "category": "resource",
+      "description": "Assumptions that personnel, time, equipment, attention, and reserve capacity are sufficient for planned tasks.",
+      "risk_factors": [
+        "resource demand may exceed planning estimates",
+        "reserve capacity may be consumed early",
+        "critical skills or equipment may not be available when needed"
+      ],
+      "observable_indicators": [
+        "resource request exceeds plan",
+        "reserve capacity consumed",
+        "equipment readiness delay",
+        "critical staff overloaded"
+      ],
+      "mitigation_patterns": [
+        "identify minimum viable resource set",
+        "prioritize critical tasks",
+        "set reserve release triggers",
+        "reduce scope before overload accumulates"
+      ],
+      "base_fragility": 72,
+      "safe_historical_analog_summary": "Resource assumptions can fail when availability, demand, or readiness is not validated.",
+      "doctrine_note": "Uncertainty must be actively monitored, and plans should include branch options for resource limits.",
+      "rag_keywords": [
+        "resource",
+        "resources",
+        "personnel",
+        "equipment",
+        "capacity",
+        "reserve",
+        "staff",
+        "readiness",
+        "time"
+      ]
+    },
+    {
+      "id": "command_coordination",
+      "category": "command_coordination",
+      "description": "Assumptions that command relationships, responsibilities, handoffs, and decision ownership remain clear.",
+      "risk_factors": [
+        "decision ownership may be unclear under friction",
+        "handoffs can fail without confirmation",
+        "parallel coordination can create conflicting priorities"
+      ],
+      "observable_indicators": [
+        "unassigned task owner",
+        "missed handoff",
+        "conflicting priority guidance",
+        "late decision request"
+      ],
+      "mitigation_patterns": [
+        "name owners for critical assumptions",
+        "use handoff confirmation checks",
+        "define priority rules",
+        "add decision review checkpoints"
+      ],
+      "base_fragility": 68,
+      "safe_historical_analog_summary": "Command and coordination assumptions can fail when roles and decision paths are unclear.",
+      "doctrine_note": "Commanders need updated information requirements, and assumptions require validation by named owners.",
+      "rag_keywords": [
+        "command",
+        "coordinate",
+        "coordination",
+        "commander",
+        "decision",
+        "owner",
+        "handoff",
+        "priority",
+        "synchronize",
+        "team"
+      ]
+    },
+    {
+      "id": "information_environment_stability",
+      "category": "information_environment",
+      "description": "Assumptions that the public information environment, narratives, rumors, and perception remain stable enough for coordination.",
+      "risk_factors": [
+        "rumors can change stakeholder behavior",
+        "public messaging may lag operational changes",
+        "conflicting narratives can increase coordination demand"
+      ],
+      "observable_indicators": [
+        "misinformation report",
+        "public confusion indicator",
+        "changed stakeholder messaging",
+        "unexpected demand for clarification"
+      ],
+      "mitigation_patterns": [
+        "monitor information indicators",
+        "coordinate public update timing",
+        "prepare clarification messages",
+        "reduce scope if perception-driven demand rises"
+      ],
+      "base_fragility": 65,
+      "safe_historical_analog_summary": "Information environment assumptions can shift when rumors, messaging, or perception changes.",
+      "doctrine_note": "Operating environments change, and uncertainty must be actively monitored through updated information requirements.",
+      "rag_keywords": [
+        "information environment",
+        "rumor",
+        "misinformation",
+        "public messaging",
+        "narrative",
+        "perception",
+        "media",
+        "clarification",
+        "stakeholder"
+      ]
+    }
+  ]
+}
