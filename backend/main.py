@@ -1,4 +1,5 @@
 from __future__ import annotations
+import os
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from extraction import extract_assumptions
@@ -18,6 +19,17 @@ app.add_middleware(
 @app.get("/health")
 def health():
     return {"ok": True, "model": "meta-llama/llama-3.3-70b-instruct:free"}
+
+@app.get("/health/startup")
+def startup_health():
+    """Deployment-time readiness check for required environment variables."""
+    has_openrouter_key = bool(os.getenv("OPENROUTER_API_KEY"))
+    if not has_openrouter_key:
+        raise HTTPException(
+            status_code=500,
+            detail="OPENROUTER_API_KEY is not configured",
+        )
+    return {"ok": True, "openrouter_api_key_configured": True}
 
 @app.post("/games", response_model=GameState)
 def create_game(req: NewGameRequest):

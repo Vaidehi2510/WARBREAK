@@ -1,0 +1,39 @@
+{
+  "version": 2,
+  "builds": [
+    {
+      "src": "frontend/package.json",
+      "use": "@vercel/next"
+    },
+    {
+      "src": "api/index.py",
+      "use": "@vercel/python"
+    }
+  ],
+  "routes": [
+    {
+      "src": "/health",
+      "dest": "api/index.py"
+    },
+    {
+      "src": "/games",
+      "dest": "api/index.py"
+    },
+    {
+      "src": "/games/(.*)",
+      "dest": "api/index.py"
+    },
+    {
+      "src": "/turn",
+      "dest": "api/index.py"
+    },
+    {
+      "src": "/autopsy/(.*)",
+      "dest": "api/index.py"
+    },
+    {
+      "src": "/(.*)",
+      "dest": "frontend/$1"
+    }
+  ]
+}

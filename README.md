@@ -30,6 +30,14 @@ Open http://localhost:3000
 - AI: Llama 3.3 70B via OpenRouter (free)
 - Frontend: Next.js + TypeScript
 
+## Deploy on Vercel
+
+This repo is configured for a single Vercel project that serves both:
+- Frontend from `frontend/`
+- Backend API from `backend/` through root routing
+
+See [DEPLOY_VERCEL.md](DEPLOY_VERCEL.md) for the exact setup steps and required environment variables.
+
 ## Get OpenRouter key
 1. Go to openrouter.ai
 2. Create free account
