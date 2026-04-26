@@ -32,7 +32,7 @@ def health():
         "version": "2.0.0",
         "provider": PROVIDER,
         "model": MODEL,
-        "providers": provider_status(),
+        "providers": provider_status,
     }
 
 @app.get("/health/startup")
