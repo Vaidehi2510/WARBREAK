@@ -73,6 +73,12 @@ export default function AssetsPage() {
     localStorage.setItem("warbreak_asset_ids",       JSON.stringify(selected));
     localStorage.setItem("warbreak_max_turns",       String(picked.length));
     localStorage.setItem("warbreak_opponent_assets", JSON.stringify(brief || {}));
+    localStorage.removeItem("warbreak_game_id");
+    localStorage.removeItem("warbreak_game");
+    localStorage.removeItem("warbreak_history");
+    localStorage.removeItem("warbreak_metrics");
+    localStorage.removeItem("warbreak_red_used");
+    localStorage.removeItem("warbreak_used_actions");
     localStorage.removeItem("warbreak_damage_reports");
     router.push("/game");
   };

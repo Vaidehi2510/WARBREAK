@@ -37,6 +37,19 @@ type DamageReport = {
   evidence: string[];
   provisional?: boolean;
 };
+type DeploymentZone = { label:string; center:LatLng; radius:number };
+type CounterPlan = {
+  sourceIndex: number;
+  sourceName: string;
+  targetKey: string;
+  targetTitle: string;
+  damage: number;
+  nextReadiness: number;
+  compromised: boolean;
+  narrative: string;
+};
+
+const COMPROMISED_THRESHOLD = 35;
 
 const assetActions: Record<string, Action> = {
   carrier:  { key:"carrier_strike",    title:"Carrier Strike Group",      desc:"Launch long-range air package.",         icon:"⚓",  asset:"carrier",  kind:"strike",  once:true },
@@ -58,6 +71,29 @@ const mapCfg: any = {
   "NATO Eastern Flank": { center:[53.4,22.6],  zoom:6, why:"Suwalki Gap, Baltic access, NATO cohesion, Russian pressure.",  label:"Suwalki Gap",   red:[[54.6,25.3,"▰"],[53.9,27.5,"🚀"],[54.9,20.5,"⚓"]], blue:[[52.2,21.0,"▰"],[54.7,18.6,"✈️"],[53.1,23.1,"▲"]] },
   "Embassy Evacuation": { center:[33.33,44.38], zoom:7, why:"Air corridors, roads, embassy access, harbor reach.",          label:"Capital zone",  red:[[33.45,44.45,"▰"],[33.28,44.54,"🚀"],[33.36,44.25,"⚡"]], blue:[[33.31,44.36,"🚁"],[33.25,44.31,"✦"],[33.5,44.1,"▣"]] },
   "Cyber Infrastructure": { center:[40.75,-74.3], zoom:6, why:"Substations, command networks, cascading infrastructure.",   label:"Northeast grid",red:[[40.72,-74.0,"⚡"],[41.1,-73.7,"▣"],[40.2,-75.1,"⚠️"]], blue:[[40.76,-73.9,"🛡️"],[40.4,-74.6,"⚡"],[41.0,-74.2,"🔎"]] },
+};
+
+const deploymentZones: Record<string, DeploymentZone[]> = {
+  "Taiwan Strait 2027": [
+    { label:"Blue maritime access", center:[24.45,122.15], radius:230000 },
+    { label:"Okinawa air corridor", center:[26.05,127.55], radius:170000 },
+    { label:"Taiwan lodgment", center:[23.85,121.05], radius:120000 },
+  ],
+  "NATO Eastern Flank": [
+    { label:"Baltic access", center:[55.05,19.2], radius:190000 },
+    { label:"Poland forward belt", center:[52.65,21.9], radius:180000 },
+    { label:"Suwalki corridor", center:[54.1,23.0], radius:130000 },
+  ],
+  "Embassy Evacuation": [
+    { label:"Embassy ground corridor", center:[33.31,44.36], radius:42000 },
+    { label:"Airfield approach", center:[33.50,44.18], radius:36000 },
+    { label:"River evacuation route", center:[33.25,44.30], radius:30000 },
+  ],
+  "Cyber Infrastructure": [
+    { label:"Northeast grid response", center:[40.75,-74.15], radius:65000 },
+    { label:"Substation recovery belt", center:[40.70,-74.45], radius:52000 },
+    { label:"Command network pocket", center:[40.98,-74.05], radius:48000 },
+  ],
 };
 
 const fallbackPlans: Record<string, string> = {
@@ -263,6 +299,150 @@ function matchOpponentAssetIndex(assets: OpponentAsset[], action: Action) {
   return index >= 0 ? index : 0;
 }
 
+function targetRolesForAction(action: Action) {
+  if (action.kind === "sub") return ["submarine", "surface", "missile"];
+  if (action.kind === "cyber") return ["cyber", "information", "infrastructure", "airDefense"];
+  if (action.kind === "defense") return ["missile", "airDefense", "aircraft"];
+  if (action.kind === "ground") return ["ground", "information", "infrastructure"];
+  if (action.kind === "sensor") return ["submarine", "missile", "ground", "cyber", "surface"];
+  if (action.asset === "carrier") return ["airDefense", "missile", "surface", "aircraft"];
+  if (action.asset === "sof") return ["missile", "airDefense", "ground", "information"];
+  return ["airDefense", "missile", "aircraft", "ground", "surface"];
+}
+
+function targetCountForAction(action: Action) {
+  if (action.kind === "sensor") return 4;
+  if (action.asset === "carrier") return 3;
+  if (action.kind === "cyber" || action.kind === "sub" || action.kind === "ground") return 2;
+  if (action.kind === "defense") return 2;
+  return 2;
+}
+
+function targetOpponentIndexes(assets: OpponentAsset[], action: Action) {
+  if (!assets.length) return [];
+  const limit = Math.min(targetCountForAction(action), assets.length);
+  const roles = targetRolesForAction(action);
+  const picked: number[] = [];
+
+  roles.forEach(role => {
+    assets.forEach((asset, index) => {
+      if (picked.length >= limit) return;
+      if (!picked.includes(index) && opponentRole(asset) === role) picked.push(index);
+    });
+  });
+
+  assets
+    .map((asset, index) => ({ index, confidence:pct(asset.confidence, 50) }))
+    .sort((a, b) => b.confidence - a.confidence)
+    .forEach(item => {
+      if (picked.length < limit && !picked.includes(item.index)) picked.push(item.index);
+    });
+
+  return picked.length ? picked : [0];
+}
+
+function targetLabelFor(assets: OpponentAsset[], indexes: number[]) {
+  const names = indexes.map(index => opponentName(assets[index])).filter(Boolean);
+  if (!names.length) return "Likely opponent asset";
+  if (names.length === 1) return names[0];
+  return `${names[0]} + ${names.length - 1} more`;
+}
+
+function resourceLabelFor(action: Action, assets: OpponentAsset[], indexes: number[]) {
+  const resources = indexes
+    .map(index => resourceForTarget(action, assets[index]))
+    .filter(Boolean)
+    .map(item => item.toLowerCase());
+  const unique = Array.from(new Set(resources));
+  if (!unique.length) return action.title;
+  if (unique.length === 1) return unique[0];
+  return `${unique[0]} / ${unique.slice(1).join(" / ")}`;
+}
+
+function readinessLabel(value: number) {
+  if (value <= COMPROMISED_THRESHOLD) return "COMPROMISED";
+  if (value <= 55) return "DAMAGED";
+  if (value <= 78) return "DEGRADED";
+  return "READY";
+}
+
+function clampReadiness(value: number) {
+  return Math.max(0, Math.min(100, Math.round(value)));
+}
+
+function isCompromisedReadiness(value: number) {
+  return value <= COMPROMISED_THRESHOLD;
+}
+
+function distanceMeters(a: LatLng, b: LatLng) {
+  const toRad = (value: number) => value * Math.PI / 180;
+  const earth = 6371000;
+  const dLat = toRad(b[0] - a[0]);
+  const dLng = toRad(b[1] - a[1]);
+  const lat1 = toRad(a[0]);
+  const lat2 = toRad(b[0]);
+  const h = Math.sin(dLat / 2) ** 2 + Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) ** 2;
+  return 2 * earth * Math.asin(Math.min(1, Math.sqrt(h)));
+}
+
+function deploymentZoneHit(scenario: string, point: LatLng) {
+  const zones = deploymentZones[scenario] || deploymentZones["Taiwan Strait 2027"];
+  return zones.find(zone => distanceMeters(zone.center, point) <= zone.radius);
+}
+
+function counterDamageFor(action: Action, targetAssets: OpponentAsset[], readiness: number) {
+  const baseByKind: Record<string, number> = {
+    strike: 22,
+    cyber: 17,
+    sub: 15,
+    ground: 16,
+    sensor: 10,
+    defense: 8,
+  };
+  const rolePressure: Record<string, number> = {
+    missile: 9,
+    aircraft: 8,
+    cyber: 7,
+    airDefense: 6,
+    submarine: 6,
+    surface: 5,
+    ground: 5,
+    information: 4,
+    infrastructure: 4,
+    default: 3,
+  };
+  const pressure = targetAssets.reduce((sum, asset) => sum + (rolePressure[opponentRole(asset)] || rolePressure.default), 0);
+  const confidence = targetAssets.reduce((sum, asset) => sum + pct(asset.confidence, 55), 0) / Math.max(1, targetAssets.length);
+  const spreadBonus = targetAssets.length > 1 ? Math.max(0, 5 - targetAssets.length) : 0;
+  const fatiguePenalty = readiness < 50 ? 12 : readiness < 70 ? 7 : 0;
+  const defensiveReduction = action.kind === "defense" ? 8 : action.kind === "sensor" ? 5 : 0;
+  return Math.max(4, Math.min(48, Math.round((baseByKind[action.kind] || 14) + pressure / 2 + confidence / 14 + spreadBonus + fatiguePenalty - defensiveReduction)));
+}
+
+function buildCounterPlan(action: Action, targetAssets: OpponentAsset[], targetIndexes: number[], readiness: number): CounterPlan {
+  const sourceRank = ["missile", "aircraft", "cyber", "submarine", "airDefense", "surface", "ground", "information", "infrastructure"];
+  const rankFor = (index: number) => {
+    const rank = sourceRank.indexOf(opponentRole(targetAssets[targetIndexes.indexOf(index)]));
+    return rank >= 0 ? rank : sourceRank.length;
+  };
+  const sourceIndex = targetIndexes.slice().sort((a, b) => rankFor(a) - rankFor(b))[0] ?? targetIndexes[0] ?? 0;
+  const sourceAsset = targetAssets[targetIndexes.indexOf(sourceIndex)] || targetAssets[0];
+  const damage = counterDamageFor(action, targetAssets, readiness);
+  const nextReadiness = clampReadiness(readiness - damage);
+  const compromised = isCompromisedReadiness(nextReadiness);
+  const sourceName = opponentName(sourceAsset);
+  return {
+    sourceIndex,
+    sourceName,
+    targetKey: action.key,
+    targetTitle: action.title,
+    damage,
+    nextReadiness,
+    compromised,
+    narrative: `Red counterattack: ${sourceName} hit ${action.title}, readiness ${readiness}% -> ${nextReadiness}%${compromised ? " (compromised)" : ""}.`,
+  };
+}
+
 function localGhostCouncil(act: Action, redAsset: string, scenario: string) {
   const pressure: Record<string, string> = {
     strike: "Red disperses the visible target set and turns your kinetic move into a contest over proof, timing, and escalation control.",
@@ -375,6 +555,39 @@ function buildDamageReport(
   };
 }
 
+function enrichDamageReport(
+  report: DamageReport,
+  targetLabel: string,
+  resourceLabel: string,
+  targetCount: number,
+  counter: CounterPlan,
+): DamageReport {
+  const multiTarget = targetCount > 1 ? `Target set: ${targetLabel}` : "";
+  const counterEvidence = `${counter.sourceName} countered ${counter.targetTitle}: -${counter.damage}% Blue readiness`;
+  return {
+    ...report,
+    target: targetLabel,
+    resource: resourceLabel,
+    blueCost: Math.max(report.blueCost, counter.damage),
+    evidence: [
+      ...report.evidence,
+      multiTarget,
+      counterEvidence,
+      counter.compromised ? `${counter.targetTitle} is compromised and unavailable for follow-on attack.` : "",
+    ].filter((item): item is string => Boolean(item)),
+  };
+}
+
+function applyCounterToMetrics(baseMetrics: Record<string, number>, beforeMetrics: Record<string, number>, counter: CounterPlan) {
+  const beforeBlue = pct(beforeMetrics.blue_strength, 100);
+  const mergedBlue = pct(baseMetrics.blue_strength, beforeBlue);
+  const forceLoss = Math.max(2, Math.round(counter.damage * 0.42));
+  return {
+    ...baseMetrics,
+    blue_strength: Math.min(mergedBlue, clampReadiness(beforeBlue - forceLoss)),
+  };
+}
+
 function analystRead(report: DamageReport) {
   const resource = report.resource.toLowerCase();
   const recovery = report.recovery !== "not confirmed" ? `recovery ${report.recovery}` : "recovery unconfirmed";
@@ -440,6 +653,7 @@ export default function GamePage() {
   const leafletLib = useRef<any>(null);
   const blueLayer = useRef<any>(null);
   const redLayer = useRef<any>(null);
+  const deployLayer = useRef<any>(null);
   const fxLayer = useRef<any>(null);
 
   const [scenario,  setScenario]  = useState("Taiwan Strait 2027");
@@ -456,8 +670,13 @@ export default function GamePage() {
   const [assetIds,  setAssetIds]  = useState<string[]>([]);
   const [opponentAssets, setOpponentAssets] = useState<OpponentAsset[]>([]);
   const [damageReports, setDamageReports] = useState<DamageReport[]>([]);
+  const [assetReadiness, setAssetReadiness] = useState<Record<string, number>>({});
+  const [assetDeployments, setAssetDeployments] = useState<Record<string, LatLng>>({});
+  const [deploymentMode, setDeploymentMode] = useState(false);
+  const [manualTargets, setManualTargets] = useState<number[]>([]);
   const [mapReady,  setMapReady]  = useState(false);
   const [busy,      setBusy]      = useState(false);
+  const [readyForAutopsy, setReadyForAutopsy] = useState(false);
 
   // ── Load saved assets + scenario on mount ────────────────────────────────
   const actions = useMemo<Action[]>(() => {
@@ -467,6 +686,30 @@ export default function GamePage() {
       .filter(Boolean)
       .filter(a => { if (seen.has(a.key)) return false; seen.add(a.key); return true; });
   }, [assetIds]);
+
+  const readinessFor = (key: string) => clampReadiness(assetReadiness[key] ?? 100);
+  const isActionSpent = (action: Action) => Boolean(action.once && used.includes(action.key));
+  const isActionCompromised = (action: Action) => isCompromisedReadiness(readinessFor(action.key));
+  const isActionAvailable = (action: Action) => !isActionSpent(action) && !isActionCompromised(action);
+  const actionPoint = (action: Action, index: number): LatLng => assetDeployments[action.key] || assetPoint(scenario, action, index);
+  const targetLimitFor = (action?: Action) => action ? Math.max(1, Math.min(targetCountForAction(action), opponentAssets.length || 1)) : 1;
+  const activeTargetIndexes = (action: Action) => {
+    const limit = targetLimitFor(action);
+    const validManual = manualTargets.filter(index => index >= 0 && index < opponentAssets.length).slice(0, limit);
+    return validManual.length ? validManual : targetOpponentIndexes(opponentAssets, action);
+  };
+  const toggleManualTarget = (index: number) => {
+    const action = actions.find(item => item.key === selected);
+    const limit = targetLimitFor(action);
+    setManualTargets(current => {
+      if (current.includes(index)) return current.filter(item => item !== index);
+      const next = [...current, index].filter(item => item >= 0 && item < opponentAssets.length);
+      if (next.length <= limit) return next;
+      setToast(`This package can target ${limit} asset${limit === 1 ? "" : "s"}.`);
+      setTimeout(() => setToast(""), 1800);
+      return [...next.slice(1)];
+    });
+  };
 
   useEffect(() => {
     const sc  = localStorage.getItem("warbreak_scenario") || "Taiwan Strait 2027";
@@ -495,13 +738,53 @@ export default function GamePage() {
         return [];
       }
     })();
+    const storedUsed = (() => {
+      try {
+        const parsed = JSON.parse(localStorage.getItem("warbreak_used_actions") || "[]");
+        return Array.isArray(parsed) ? parsed.map(String) : [];
+      } catch {
+        return [];
+      }
+    })();
+    const storedReadiness = (() => {
+      try {
+        const parsed = JSON.parse(localStorage.getItem("warbreak_asset_readiness") || "{}");
+        return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+      } catch {
+        return {};
+      }
+    })();
+    const storedDeployments = (() => {
+      try {
+        const parsed = JSON.parse(localStorage.getItem("warbreak_asset_deployments") || "{}");
+        if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+        return Object.fromEntries(
+          Object.entries(parsed)
+            .filter(([, value]) => Array.isArray(value) && value.length === 2 && value.every(item => Number.isFinite(Number(item))))
+            .map(([key, value]) => [key, [Number((value as any)[0]), Number((value as any)[1])] as LatLng])
+        );
+      } catch {
+        return {};
+      }
+    })();
     setScenario(sc);
     setAssetIds(ids);
     setOpponentAssets(storedOpponentAssets.length ? storedOpponentAssets : fallbackOpponentAssets(sc));
     setDamageReports(storedDamageReports);
+    setUsed(storedUsed.filter((key: string) => ids.some((id: string) => assetActions[id]?.key === key)));
+    setAssetReadiness(Object.fromEntries(ids.map((id: string) => {
+      const action = assetActions[id];
+      return action ? [action.key, clampReadiness(Number(storedReadiness[action.key] ?? 100))] : [id, 100];
+    })));
+    setAssetDeployments(storedDeployments);
     setMaxTurns(Math.max(1, mt));
     setSelected(assetActions[ids[0]]?.key || "");
   }, [router]);
+
+  useEffect(() => {
+    const action = actions.find(item => item.key === selected);
+    setManualTargets(current => current.filter(index => index >= 0 && index < opponentAssets.length).slice(0, targetLimitFor(action)));
+  }, [selected, opponentAssets.length, actions]);
 
   // ── Map init ──────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -520,6 +803,7 @@ export default function GamePage() {
       L.tileLayer("https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png", { subdomains:"abcd", maxZoom:19 }).addTo(m);
       blueLayer.current = L.layerGroup().addTo(m);
       redLayer.current = L.layerGroup().addTo(m);
+      deployLayer.current = L.layerGroup().addTo(m);
       fxLayer.current = L.layerGroup().addTo(m);
       setMapReady(true);
     }
@@ -536,6 +820,7 @@ export default function GamePage() {
 
     blueLayer.current?.clearLayers();
     redLayer.current?.clearLayers();
+    deployLayer.current?.clearLayers();
 
     const icon = (cls: string, emoji: string, index?: number) => L.divIcon({
       html:`<div class="marker ${cls}">${emoji}${index ? `<span class="marker-index">${index}</span>` : ""}</div>`,
@@ -547,37 +832,126 @@ export default function GamePage() {
     opponentAssets.forEach((asset, index) => {
       const point = opponentPoint(scenario, asset, index, opponentAssets);
       const name = `${index + 1}. ${opponentName(asset)}`;
+      const targeted = manualTargets.includes(index);
       const marker = L.marker(point, {
-        icon:icon(`red opponent role-${opponentRole(asset)}`, opponentIcon(asset), index + 1),
-        zIndexOffset:300,
+        icon:icon(`red opponent role-${opponentRole(asset)} ${targeted ? "targeted" : ""}`, opponentIcon(asset), index + 1),
+        zIndexOffset: targeted ? 650 : 300,
       }).addTo(redLayer.current);
-      marker.bindTooltip(escapeHtml(name), {
+      marker.bindTooltip(escapeHtml(`${targeted ? "TARGET · " : ""}${name}`), {
         permanent:true,
         direction:"right",
         offset:[18,0],
         opacity:0.94,
-        className:"red-marker-label",
+        className:`red-marker-label ${targeted ? "targeted" : ""}`,
+      });
+      marker.on("click", () => toggleManualTarget(index));
+    });
+
+    if (deploymentMode) {
+      (deploymentZones[scenario] || deploymentZones["Taiwan Strait 2027"]).forEach(zone => {
+        L.circle(zone.center, {
+          radius:zone.radius,
+          color:"#4d9fff",
+          fillColor:"#4d9fff",
+          fillOpacity:0.08,
+          weight:2,
+          dashArray:"8 10",
+          className:"deploy-zone",
+        }).addTo(deployLayer.current);
+        L.marker(zone.center, {
+          icon:L.divIcon({
+            html:`<div class="deploy-zone-label">${escapeHtml(zone.label)}</div>`,
+            className:"",
+            iconSize:[180,24],
+            iconAnchor:[90,12],
+          }),
+          interactive:false,
+        }).addTo(deployLayer.current);
+      });
+    }
+
+    actions.forEach((action, index) => {
+      const readiness = readinessFor(action.key);
+      const compromised = isCompromisedReadiness(readiness);
+      const deployed = Boolean(assetDeployments[action.key]);
+      const point = actionPoint(action, index);
+      const marker = L.marker(point, {
+        icon:icon(`blue asset kind-${action.kind} ${selected === action.key ? "active" : ""} ${compromised ? "compromised" : ""} ${deployed ? "deployed" : ""}`, action.icon, index + 1),
+        draggable:!compromised && !readyForAutopsy,
+        zIndexOffset: selected === action.key ? 700 : 500,
+      }).addTo(blueLayer.current);
+      marker.bindTooltip(`${index + 1}. ${action.title} · ${readinessLabel(readiness)} ${readiness}% · drag to reposition`, { direction:"top", offset:[0,-18], opacity:0.92 });
+      marker.on("click", () => setSelected(action.key));
+      marker.on("dragstart", () => {
+        setSelected(action.key);
+        marker.closeTooltip();
+      });
+      marker.on("dragend", (event: any) => {
+        const latlng = event.target.getLatLng();
+        const nextPoint: LatLng = [latlng.lat, latlng.lng];
+        const zone = deploymentZoneHit(scenario, nextPoint);
+        if (!zone) {
+          event.target.setLatLng(point);
+          setToast("Outside current Blue access zone. Asset snapped back.");
+          setTimeout(() => setToast(""), 2000);
+          return;
+        }
+
+        setAssetDeployments(current => {
+          const next = { ...current, [action.key]:nextPoint };
+          localStorage.setItem("warbreak_asset_deployments", JSON.stringify(next));
+          return next;
+        });
+        setToast(`${action.title} repositioned inside ${zone.label}.`);
+        setTimeout(() => setToast(""), 1900);
       });
     });
 
-    actions.forEach((action, index) => {
-      const point = assetPoint(scenario, action, index);
-      const marker = L.marker(point, {
-        icon:icon(`blue asset kind-${action.kind} ${selected === action.key ? "active" : ""}`, action.icon, index + 1),
-        zIndexOffset: selected === action.key ? 700 : 500,
-      }).addTo(blueLayer.current);
-      marker.bindTooltip(`${index + 1}. ${action.title}`, { direction:"top", offset:[0,-18], opacity:0.92 });
-      marker.on("click", () => setSelected(action.key));
-    });
-
     if (actions.length) {
-      const points = actions.map((action, index) => assetPoint(scenario, action, index));
+      const points = actions.map((action, index) => actionPoint(action, index));
       const redPoints = opponentAssets.map((asset, index) => opponentPoint(scenario, asset, index, opponentAssets));
       try {
         map.fitBounds(L.latLngBounds([...points, ...redPoints]).pad(0.22), { animate:false, maxZoom:cfg.zoom + 1 });
       } catch {}
     }
-  }, [mapReady, scenario, actions, selected, opponentAssets]);
+  }, [mapReady, scenario, actions, selected, opponentAssets, assetDeployments, assetReadiness, deploymentMode, manualTargets, readyForAutopsy]);
+
+  useEffect(() => {
+    const map = leaflet.current;
+    if (!mapReady || !map) return;
+
+    const handleDeployClick = (event: any) => {
+      if (!deploymentMode) return;
+      const action = actions.find(item => item.key === selected);
+      if (!action) {
+        setToast("Select a Blue asset before deploying.");
+        setTimeout(() => setToast(""), 1800);
+        return;
+      }
+      if (isActionCompromised(action)) {
+        setToast("Compromised asset cannot redeploy.");
+        setTimeout(() => setToast(""), 1800);
+        return;
+      }
+
+      const point: LatLng = [event.latlng.lat, event.latlng.lng];
+      const zone = deploymentZoneHit(scenario, point);
+      if (!zone) {
+        setToast("Outside current Blue access zone.");
+        setTimeout(() => setToast(""), 1800);
+        return;
+      }
+
+      const next = { ...assetDeployments, [action.key]:point };
+      setAssetDeployments(next);
+      localStorage.setItem("warbreak_asset_deployments", JSON.stringify(next));
+      setToast(`${action.title} deployed inside ${zone.label}.`);
+      setTimeout(() => setToast(""), 1900);
+    };
+
+    map.on("click", handleDeployClick);
+    return () => { map.off("click", handleDeployClick); };
+  }, [mapReady, deploymentMode, selected, actions, scenario, assetDeployments, assetReadiness]);
 
   // ── Sound ─────────────────────────────────────────────────────────────────
   const sound = (type: string) => {
@@ -592,15 +966,20 @@ export default function GamePage() {
   };
 
   // ── Animation ─────────────────────────────────────────────────────────────
-  const animate = (action: Action) => {
+  const animate = (action: Action, targetIndexes: number[], counter?: CounterPlan) => {
     const cfg = mapCfg[scenario] || mapCfg["Taiwan Strait 2027"];
     const L = leafletLib.current;
     const map = leaflet.current;
     if (!map || !L) return;
 
     const index = Math.max(0, actions.findIndex(item => item.key === action.key));
-    const from = assetPoint(scenario, action, index);
-    const to = redTargetPoint(scenario, action, opponentAssets);
+    const from = actionPoint(action, index);
+    const targets = (targetIndexes.length ? targetIndexes : [matchOpponentAssetIndex(opponentAssets, action)].filter(item => item >= 0))
+      .map(targetIndex => ({
+        index: targetIndex,
+        point: opponentPoint(scenario, opponentAssets[targetIndex], targetIndex, opponentAssets),
+      }));
+    if (!targets.length) targets.push({ index:-1, point:redTargetPoint(scenario, action, opponentAssets) });
     const layers: any[] = [];
     const add = (layer: any) => {
       layer.addTo(fxLayer.current || map);
@@ -609,45 +988,89 @@ export default function GamePage() {
     };
 
     try {
-      map.flyToBounds(L.latLngBounds([from, to]).pad(0.55), { duration:0.55, maxZoom:cfg.zoom + 1 });
+      map.flyToBounds(L.latLngBounds([from, ...targets.map(target => target.point)]).pad(0.55), { duration:0.55, maxZoom:cfg.zoom + 1 });
     } catch {}
+
+    const pulseTarget = (to: LatLng, color: string, fillColor: string, radius = 11) => {
+      add(L.circleMarker(to, { radius, color, fillColor, fillOpacity:0.65, weight:3, className:"map-impact strike-impact" }));
+    };
+    const targetDelay = (targetNumber: number) => targetNumber * 130;
 
     if (action.kind === "strike") {
       sound("boom");
-      add(L.polyline([from, to], { color:"#e5d28c", weight:4, opacity:0.95, className:"arc strike-arc" }));
-      add(L.circleMarker(to, { radius:15, color:"#fff2ac", fillColor:"#d55348", fillOpacity:0.82, weight:3, className:"map-impact strike-impact" }));
+      targets.forEach((target, targetNumber) => {
+        setTimeout(() => {
+          add(L.polyline([from, target.point], { color:"#e5d28c", weight:4, opacity:0.95, className:"arc strike-arc" }));
+          pulseTarget(target.point, "#fff2ac", "#d55348", targetNumber === 0 ? 15 : 12);
+        }, targetDelay(targetNumber));
+      });
     } else if (action.kind === "sub") {
       sound("sonar");
       add(L.circle(from, { radius:effectRadius(scenario, 170000), color:"#48a8d8", fill:false, weight:3, className:"map-ring sonar-ring" }));
-      add(L.polyline([from, to], { color:"#48a8d8", weight:3, opacity:0.82, className:"arc patrol-arc" }));
-      add(L.circleMarker(to, { radius:9, color:"#48a8d8", fillColor:"#176b8d", fillOpacity:0.7, weight:2, className:"map-impact sonar-contact" }));
+      targets.forEach((target, targetNumber) => {
+        setTimeout(() => {
+          add(L.polyline([from, target.point], { color:"#48a8d8", weight:3, opacity:0.82, className:"arc patrol-arc" }));
+          add(L.circleMarker(target.point, { radius:9, color:"#48a8d8", fillColor:"#176b8d", fillOpacity:0.7, weight:2, className:"map-impact sonar-contact" }));
+        }, targetDelay(targetNumber));
+      });
     } else if (action.kind === "cyber") {
       sound("cyber");
-      add(L.polyline([from, to], { color:"#a855f7", weight:3, opacity:0.9, className:"arc cyber-arc" }));
-      add(L.circleMarker(to, { radius:18, color:"#c084fc", fillColor:"#6d28d9", fillOpacity:0.42, weight:3, className:"map-impact cyber-node" }));
+      targets.forEach((target, targetNumber) => {
+        setTimeout(() => {
+          add(L.polyline([from, target.point], { color:"#a855f7", weight:3, opacity:0.9, className:"arc cyber-arc" }));
+          add(L.circleMarker(target.point, { radius:18, color:"#c084fc", fillColor:"#6d28d9", fillOpacity:0.42, weight:3, className:"map-impact cyber-node" }));
+        }, targetDelay(targetNumber));
+      });
     } else if (action.kind === "defense") {
       sound("sonar");
       add(L.circle(from, { radius:effectRadius(scenario, 140000), color:"#ffaa00", fillColor:"#ffaa00", fillOpacity:0.06, weight:3, className:"map-ring defense-ring" }));
-      add(L.polyline([to, from], { color:"#ffaa00", weight:3, opacity:0.9, className:"arc intercept-arc" }));
+      targets.forEach((target, targetNumber) => {
+        setTimeout(() => {
+          add(L.polyline([target.point, from], { color:"#ffaa00", weight:3, opacity:0.9, className:"arc intercept-arc" }));
+          pulseTarget(target.point, "#ffaa00", "#ffaa00", 8);
+        }, targetDelay(targetNumber));
+      });
     } else if (action.kind === "sensor") {
       sound("sonar");
       add(L.circle(from, { radius:effectRadius(scenario, 230000), color:"#00e87a", fill:false, weight:3, className:"map-ring sensor-ring" }));
-      add(L.polyline([from, to], { color:"#00e87a", weight:2, opacity:0.7, className:"arc sensor-arc" }));
-      add(L.circleMarker(to, { radius:10, color:"#00e87a", fillColor:"#00e87a", fillOpacity:0.28, weight:2, className:"map-impact sensor-contact" }));
+      targets.forEach((target, targetNumber) => {
+        setTimeout(() => {
+          add(L.polyline([from, target.point], { color:"#00e87a", weight:2, opacity:0.7, className:"arc sensor-arc" }));
+          add(L.circleMarker(target.point, { radius:10, color:"#00e87a", fillColor:"#00e87a", fillOpacity:0.28, weight:2, className:"map-impact sensor-contact" }));
+        }, targetDelay(targetNumber));
+      });
     } else if (action.kind === "ground") {
       sound("move");
-      add(L.polyline([from, to], { color:"#ff8800", weight:4, opacity:0.86, className:"arc ground-arc" }));
+      targets.forEach((target, targetNumber) => {
+        setTimeout(() => {
+          add(L.polyline([from, target.point], { color:"#ff8800", weight:4, opacity:0.86, className:"arc ground-arc" }));
+          pulseTarget(target.point, "#ffba55", "#ff8800", 10);
+        }, targetDelay(targetNumber));
+      });
       add(L.circle(from, { radius:effectRadius(scenario, 90000), color:"#ff8800", fillColor:"#ff8800", fillOpacity:0.08, weight:3, className:"map-ring ground-zone" }));
     } else {
       sound("sonar");
       add(L.circle(from, { radius:effectRadius(scenario, 160000), color:"#e0d494", fill:false, weight:3, className:"map-ring sensor-ring" }));
     }
 
+    if (counter && counter.damage > 0) {
+      const sourcePoint = counter.sourceIndex >= 0
+        ? opponentPoint(scenario, opponentAssets[counter.sourceIndex], counter.sourceIndex, opponentAssets)
+        : targets[0]?.point;
+      if (sourcePoint) {
+        setTimeout(() => {
+          sound(counter.damage >= 24 ? "boom" : "cyber");
+          add(L.polyline([sourcePoint, from], { color:"#ff5b51", weight:3, opacity:0.9, className:"arc counter-arc" }));
+          add(L.circleMarker(from, { radius:12 + Math.min(10, Math.round(counter.damage / 5)), color:"#ffb0a8", fillColor:"#d55348", fillOpacity:0.38, weight:3, className:"map-impact counter-impact" }));
+        }, 760 + targetDelay(targets.length));
+      }
+    }
+
     setTimeout(() => {
       layers.forEach(layer => {
         try { layer.remove(); } catch {}
       });
-    }, 1900);
+    }, 2900);
   };
 
   const upsertDamageReport = (report: DamageReport) => {
@@ -667,21 +1090,50 @@ export default function GamePage() {
   // ── Execute turn ──────────────────────────────────────────────────────────
   const execute = async () => {
     if (busy) return;
-    const act = actions.find(a => a.key === selected) || actions[0];
+    const selectedAction = actions.find(a => a.key === selected);
+    if (selectedAction && !isActionAvailable(selectedAction)) {
+      const next = actions.find(a => isActionAvailable(a));
+      setSelected(next?.key || "");
+      const reason = isActionCompromised(selectedAction) ? "compromised" : "spent";
+      setToast(next ? `Selected package is ${reason}. Moved to next available package.` : "No deployable Blue package remains.");
+      setTimeout(() => setToast(""), 2200);
+      return;
+    }
+    const act = selectedAction || actions.find(a => isActionAvailable(a)) || actions[0];
     if (!act) return;
-    if (act.once && used.includes(act.key)) {
-      setToast("That one-time action has already been used.");
+    if (!isActionAvailable(act)) {
+      setToast("No deployable Blue package remains.");
       setTimeout(() => setToast(""), 2000);
       return;
     }
-    if (act.once) setUsed(u => [...u, act.key]);
-    animate(act);
+
+    const targetIndexes = activeTargetIndexes(act);
+    const targetAssets = targetIndexes.map(index => opponentAssets[index]).filter(Boolean);
+    const targetOpponent = targetAssets[0] || opponentAssets[matchOpponentAssetIndex(opponentAssets, act)];
+    const targetLabel = targetLabelFor(opponentAssets, targetIndexes);
+    const resourceLabel = resourceLabelFor(act, opponentAssets, targetIndexes);
+    const redAssetNames = targetIndexes.map(index => opponentName(opponentAssets[index])).filter(Boolean);
+    const readiness = readinessFor(act.key);
+    const counterTargets = targetAssets.length ? targetAssets : (targetOpponent ? [targetOpponent] : []);
+    const counter = buildCounterPlan(act, counterTargets, targetIndexes, readiness);
+    const nextReadinessState = { ...assetReadiness, [act.key]:counter.nextReadiness };
+    const nextUsed = Array.from(new Set([...used, act.key]));
+    const canUseAfter = (action: Action) => {
+      const spent = Boolean(action.once && nextUsed.includes(action.key));
+      const compromised = isCompromisedReadiness(clampReadiness(nextReadinessState[action.key] ?? 100));
+      return !spent && !compromised;
+    };
+    const nextUnused = actions.find(a => a.key !== act.key && canUseAfter(a)) || actions.find(a => canUseAfter(a));
+    setUsed(nextUsed);
+    localStorage.setItem("warbreak_used_actions", JSON.stringify(nextUsed));
+    setAssetReadiness(nextReadinessState);
+    localStorage.setItem("warbreak_asset_readiness", JSON.stringify(nextReadinessState));
+    animate(act, targetIndexes, counter);
     setBusy(true);
 
-    const targetOpponent = opponentAssets[matchOpponentAssetIndex(opponentAssets, act)];
-    const redAsset = opponentName(targetOpponent);
-    setRedUsed(r => Array.from(new Set([...r, redAsset])));
-    const turnAction = `${act.title}: ${act.desc}`;
+    const nextRedUsed = Array.from(new Set([...redUsed, ...redAssetNames]));
+    setRedUsed(nextRedUsed);
+    const turnAction = `${act.title}: ${act.desc} Target set: ${targetLabel}. Red counterattack on ${act.title}: -${counter.damage}% readiness.`;
 
     void previewTurnBda(turnAction, metrics, turn, maxTurns)
       .then(preview => {
@@ -689,7 +1141,7 @@ export default function GamePage() {
         const previewMetrics = preview.metrics || {};
         const projectedMetrics = Object.keys(previewMetrics).length ? { ...metrics, ...previewMetrics } : metrics;
         const previewReport = buildDamageReport(act, targetOpponent, turn, event, metrics, projectedMetrics, maxTurns);
-        if (previewReport) upsertDamageReport(previewReport);
+        if (previewReport) upsertDamageReport(enrichDamageReport(previewReport, targetLabel, resourceLabel, Math.max(1, targetAssets.length), counter));
       })
       .catch(() => {
         // The full turn request below still owns the authoritative result.
@@ -728,37 +1180,60 @@ export default function GamePage() {
         || (res.events?.at(-1)?.ghost_reasoning)
         || "";
 
-      // Update metrics from response
+      // Update metrics from response, then apply the local counter-fire effect to Blue readiness.
       const newMetrics = res.metrics || res.game_state || {};
-      if (Object.keys(newMetrics).length > 0) {
-        metricsForStorage = { ...metrics, ...newMetrics };
-        setMetrics((m: any) => ({ ...m, ...newMetrics }));
-      }
+      const mergedMetrics = Object.keys(newMetrics).length > 0 ? { ...metrics, ...newMetrics } : metrics;
+      metricsForStorage = applyCounterToMetrics(mergedMetrics, metrics, counter);
+      setMetrics((m: any) => ({ ...m, ...metricsForStorage }));
       const event = latestEventFrom(res);
       const damageReport = buildDamageReport(act, targetOpponent, turn, event, metrics, metricsForStorage, maxTurns);
-      if (damageReport) upsertDamageReport(damageReport);
+      if (damageReport) upsertDamageReport(enrichDamageReport(damageReport, targetLabel, resourceLabel, Math.max(1, targetAssets.length), counter));
       localStorage.setItem("warbreak_game", JSON.stringify(res));
     } catch {
       setToast("Live BDA pending: backend turn data unavailable.");
       setTimeout(() => setToast(""), 2200);
-      ghostReply = localGhostCouncil(act, redAsset, scenario);
+      metricsForStorage = applyCounterToMetrics(metrics, metrics, counter);
+      setMetrics((m: any) => ({ ...m, ...metricsForStorage }));
+      const fallbackEvent = {
+        turn,
+        metric_deltas: {
+          red_strength: -Math.max(4, Math.round(counter.damage / Math.max(2, targetAssets.length + 1))),
+          blue_strength: -Math.max(2, Math.round(counter.damage * 0.42)),
+        },
+        red_move: counter.narrative,
+      };
+      const fallbackReport = buildDamageReport(act, targetOpponent, turn, fallbackEvent, metrics, metricsForStorage, maxTurns);
+      if (fallbackReport) {
+        upsertDamageReport({
+          ...enrichDamageReport(fallbackReport, targetLabel, resourceLabel, Math.max(1, targetAssets.length), counter),
+          source:"Local counter-fire estimate",
+          provisional:true,
+        });
+      }
+      ghostReply = localGhostCouncil(act, targetLabel, scenario);
     }
 
     if (!ghostReply) {
       ghostReply = `Turn ${turn}: Ghost Council responds to your ${act.title}. Red exploits the assumption behind your move — not just the unit you moved.`;
     }
+    ghostReply = `${ghostReply} ${counter.narrative}`;
 
     setGhost(ghostReply);
     setGhostHistory(h => [...h, { turn, response: ghostReply }]);
-    setHistory(h => [...h, { turn, action: act.title, red: redAsset, ghost: ghostReply }]);
+    setHistory(h => [...h, { turn, action: act.title, red: targetLabel, ghost: ghostReply, counter: counter.narrative }]);
     setBusy(false);
 
     if (turn >= maxTurns) {
-      localStorage.setItem("warbreak_history",  JSON.stringify([...history, { turn, action:act.title, red:redAsset, ghost:ghostReply }]));
+      localStorage.setItem("warbreak_history",  JSON.stringify([...history, { turn, action:act.title, red:targetLabel, ghost:ghostReply, counter:counter.narrative }]));
       localStorage.setItem("warbreak_metrics",  JSON.stringify(metricsForStorage));
-      localStorage.setItem("warbreak_red_used", JSON.stringify(Array.from(new Set([...redUsed, redAsset]))));
-      router.push("/autopsy");
+      localStorage.setItem("warbreak_red_used", JSON.stringify(nextRedUsed));
+      setReadyForAutopsy(true);
+      setSelected("");
+      setToast("All turns complete. Review the board, then click I AM DONE.");
+      setTimeout(() => setToast(""), 2600);
     } else {
+      setSelected(nextUnused?.key || "");
+      setManualTargets([]);
       setTurn(t => t + 1);
     }
   };
@@ -775,6 +1250,14 @@ export default function GamePage() {
   const followUpWindow = latestDamage
     ? analystRead(latestDamage)
     : "Board populates after live backend adjudication returns turn metrics.";
+  const selectedActionMeta = actions.find(action => action.key === selected);
+  const selectedSpent = Boolean(selectedActionMeta && isActionSpent(selectedActionMeta));
+  const selectedCompromised = Boolean(selectedActionMeta && isActionCompromised(selectedActionMeta));
+  const canExecute = !readyForAutopsy && !busy && Boolean(selectedActionMeta) && !selectedSpent && !selectedCompromised;
+  const selectedTargetLimit = targetLimitFor(selectedActionMeta);
+  const selectedTargetIndexes = selectedActionMeta ? activeTargetIndexes(selectedActionMeta) : [];
+  const selectedTargetLabel = selectedActionMeta ? targetLabelFor(opponentAssets, selectedTargetIndexes) : "No target";
+  const usingManualTargets = manualTargets.length > 0;
 
   const buildFallbackPlan = (act?: Action) => {
     const forceNames = actions.map(a => a.title).join(", ") || "the selected force package";
@@ -801,9 +1284,10 @@ export default function GamePage() {
           <span className="badge">{scenario}</span>
         </div>
         <div style={{ display:"flex", gap:8, alignItems:"center" }}>
+          <span className="badge team-badge">YOU: BLUE TEAM</span>
           <span className="badge">Turn {turn}/{maxTurns}</span>
-          <span className="badge" style={{ background:"rgba(0,232,122,0.15)", border:"1px solid rgba(0,232,122,0.3)", color:"#00e87a" }}>
-            ACTIVE
+          <span className="badge" style={{ background:readyForAutopsy ? "rgba(77,159,255,0.15)" : "rgba(0,232,122,0.15)", border:`1px solid ${readyForAutopsy ? "rgba(77,159,255,0.3)" : "rgba(0,232,122,0.3)"}`, color:readyForAutopsy ? "#9bc8ff" : "#00e87a" }}>
+            {readyForAutopsy ? "TURNS COMPLETE" : "ACTIVE"}
           </span>
           {busy && <span className="badge" style={{ background:"rgba(255,170,0,0.15)", color:"#ffaa00" }}>PROCESSING...</span>}
         </div>
@@ -816,29 +1300,71 @@ export default function GamePage() {
           <div className="map-overlay" />
           <div className="scanline" />
           <div className="stage-hud">
-            <div className="note">Drag to pan · scroll to zoom</div>
+            <div className="note">Drag map or Blue assets · scroll to zoom</div>
             <div className="note dark">Why this area? {cfg.why}</div>
+            {deploymentMode && (
+              <div className="note deploy-note">Deployment mode · select an asset, then click inside a Blue access zone</div>
+            )}
+            {!deploymentMode && selectedActionMeta && (
+              <div className="note target-note">
+                Targeting {usingManualTargets ? "manual" : "auto"} · {selectedTargetIndexes.length}/{selectedTargetLimit} · {selectedTargetLabel}
+              </div>
+            )}
           </div>
           {toast && <div className="toast">{toast}</div>}
 
           {/* Actions dock */}
           <div className="execute-row">
-            <button className="btn primary" onClick={execute} disabled={busy || !selected} style={{ opacity: busy||!selected ? 0.5 : 1 }}>
-              {busy ? "EXECUTING…" : "EXECUTE SELECTED →"}
+            <button
+              className="btn primary"
+              onClick={readyForAutopsy ? () => router.push("/autopsy") : execute}
+              disabled={readyForAutopsy ? false : !canExecute}
+              style={{ opacity: readyForAutopsy || canExecute ? 1 : 0.5 }}
+            >
+              {readyForAutopsy ? "I AM DONE →" : busy ? "EXECUTING…" : selectedCompromised ? "ASSET COMPROMISED" : selectedSpent ? "PACKAGE SPENT" : "EXECUTE SELECTED →"}
             </button>
+            <button
+              className={`btn ghost deploy-toggle ${deploymentMode ? "active" : ""}`}
+              onClick={() => setDeploymentMode(mode => !mode)}
+              disabled={readyForAutopsy || !selectedActionMeta || selectedCompromised}
+              style={{ opacity: readyForAutopsy || !selectedActionMeta || selectedCompromised ? 0.5 : 1 }}
+            >
+              {deploymentMode ? "CLICK MAP TO DEPLOY" : "DEPLOY SELECTED"}
+            </button>
+            {manualTargets.length > 0 && (
+              <button className="btn ghost clear-targets" onClick={() => setManualTargets([])}>
+                AUTO TARGETS
+              </button>
+            )}
           </div>
           <div className="actions-dock">
-            {actions.map((a, i) => (
-              <button
-                key={a.key}
-                onClick={() => setSelected(a.key)}
-                className={`action-card ${selected===a.key?"selected":""} ${used.includes(a.key)?"used":""}`}
-              >
-                <h4 style={{ fontSize:12, margin:"0 0 3px" }}>{i+1}. {a.icon} {a.title}</h4>
-                <p style={{ fontSize:10, margin:0, opacity:0.65 }}>{a.desc}</p>
-                {used.includes(a.key) && <span className="small" style={{ fontSize:9, color:"#ff6644" }}>Used</span>}
-              </button>
-            ))}
+            {actions.map((a, i) => {
+              const readiness = readinessFor(a.key);
+              const spent = isActionSpent(a);
+              const compromised = isActionCompromised(a);
+              const deployed = Boolean(assetDeployments[a.key]);
+              const targetCount = Math.min(Math.max(1, opponentAssets.length), targetCountForAction(a));
+              return (
+                <button
+                  key={a.key}
+                  onClick={() => !spent && !compromised && setSelected(a.key)}
+                  disabled={spent || compromised}
+                  className={`action-card ${selected===a.key?"selected":""} ${spent?"used":""} ${compromised?"compromised":""} ${deployed?"deployed":""}`}
+                >
+                  <div className="action-card-top">
+                    <h4 style={{ fontSize:12, margin:"0 0 3px" }}>{i+1}. {a.icon} {a.title}</h4>
+                    <span className={`readiness-pill ${readinessLabel(readiness).toLowerCase()}`}>{readiness}%</span>
+                  </div>
+                  <p style={{ fontSize:10, margin:0, opacity:0.65 }}>{a.desc}</p>
+                  <div className="action-card-meta">
+                    <span>{readinessLabel(readiness)}</span>
+                    <span>{targetCount} target{targetCount === 1 ? "" : "s"}</span>
+                    {deployed && <span>DEPLOYED</span>}
+                    {spent && <span>SPENT</span>}
+                  </div>
+                </button>
+              );
+            })}
           </div>
         </section>
 
@@ -945,16 +1471,22 @@ export default function GamePage() {
 
           {/* Opponent package */}
           <div className="side-card">
-            <h3 style={{ fontSize:13, marginTop:0, marginBottom:8 }}>Likely opponent package</h3>
+            <h3 style={{ fontSize:13, marginTop:0, marginBottom:8 }}>Target red assets</h3>
             <div className="opponent-list">
               {opponentAssets.map((asset, i) => {
                 const name = opponentName(asset);
                 const engaged = redUsed.includes(name);
+                const targeted = manualTargets.includes(i);
                 return (
-                  <p key={`${name}-${i}`} className={`opponent-row ${engaged ? "engaged" : ""}`}>
+                  <button
+                    key={`${name}-${i}`}
+                    type="button"
+                    onClick={() => toggleManualTarget(i)}
+                    className={`opponent-row ${engaged ? "engaged" : ""} ${targeted ? "targeted" : ""}`}
+                  >
                     <span>{opponentIcon(asset)} {name}</span>
-                    <b>{engaged ? "ENGAGED" : `${asset.confidence || "—"}%`}</b>
-                  </p>
+                    <b>{targeted ? "TARGET" : engaged ? "ENGAGED" : `${asset.confidence || "—"}%`}</b>
+                  </button>
                 );
               })}
               {!opponentAssets.length && (

@@ -36,11 +36,12 @@ export default function Page() {
 
   return (
     <main style={{
-      height: "100vh",
-      width: "100vw",
-      overflow: "hidden",
+      minHeight: "100dvh",
+      width: "100%",
+      overflowX: "hidden",
+      overflowY: "auto",
       display: "grid",
-      gridTemplateColumns: "1fr 1fr",
+      gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 420px), 1fr))",
       position: "relative",
     }}>
 
@@ -55,7 +56,7 @@ export default function Page() {
 
       {/* ── LEFT ── */}
       <div style={{
-        padding: "0 40px 0 56px",
+        padding: "clamp(20px, 4vw, 56px)",
         display: "flex",
         flexDirection: "column",
         justifyContent: "center",
@@ -78,7 +79,7 @@ export default function Page() {
         {/* Scenario cards */}
         <div>
           <div className="kicker" style={{ marginBottom: 10, fontSize: 10 }}>SELECT SCENARIO</div>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 180px), 1fr))", gap: 8 }}>
             {scenarios.map(s => (
               <button
                 key={s.name}
@@ -114,7 +115,7 @@ export default function Page() {
 
       {/* ── RIGHT ── */}
       <div style={{
-        padding: "0 56px 0 40px",
+        padding: "clamp(20px, 4vw, 56px)",
         display: "flex",
         flexDirection: "column",
         justifyContent: "center",

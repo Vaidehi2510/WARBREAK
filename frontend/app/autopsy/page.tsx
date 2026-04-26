@@ -664,7 +664,9 @@ function deriveMissionOutcome(view: AutopsyView) {
     view.final_metrics.allied_confidence ?? 58,
     view.final_metrics.blue_strength ?? 100,
   );
-  const latestDamage = view.damageReports[0];
+  const strongestDamage = view.damageReports.reduce((max, report) => Math.max(max, report.damage), 0);
+  const onlyLowEffect = view.damageReports.length > 0 && strongestDamage < 20;
+  const heavyStress = view.assumptions_stressed >= Math.max(4, Math.ceil(view.turns * 0.8));
 
   if (view.status === "failed" || bluePressure <= 15) {
     return {
@@ -686,7 +688,7 @@ function deriveMissionOutcome(view: AutopsyView) {
     };
   }
 
-  if (view.assumptions_stressed >= 3 || bluePressure < 55 || (latestDamage && latestDamage.damage < 20)) {
+  if (heavyStress || bluePressure < 55 || onlyLowEffect) {
     return {
       icon: "◆",
       label: "MISSION DEGRADED",
