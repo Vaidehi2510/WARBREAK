@@ -18,6 +18,8 @@ Create a Vercel project from `Nikhil123n/WARBREAK` with these settings:
 
 The backend uses [backend/vercel.json](backend/vercel.json). Vercel will install [backend/requirements.txt](backend/requirements.txt) and expose the FastAPI app from [backend/main.py](backend/main.py).
 
+Do not add a `functions.main.py` override. Current Vercel builds only match `functions` patterns against Serverless Functions inside an `api/` directory, while this backend uses the FastAPI preset's root `main.py` entrypoint.
+
 Set backend environment variables in Vercel:
 
 ```env
