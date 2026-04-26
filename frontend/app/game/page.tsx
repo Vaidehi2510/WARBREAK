@@ -121,6 +121,8 @@ const opponentPositions: Record<string, Record<string, LatLng[]>> = {
   "Taiwan Strait 2027": {
     missile:[[24.449,118.075],[25.507,119.499]],
     submarine:[[23.566,119.593],[22.629,120.081]],
+    surface:[[22.629,120.081],[23.566,119.593]],
+    aircraft:[[25.507,119.499],[25.986,119.435]],
     airDefense:[[25.986,119.435],[24.515,118.147]],
     cyber:[[24.479,118.089]],
     information:[[24.479,118.089]],
@@ -129,6 +131,8 @@ const opponentPositions: Record<string, Record<string, LatLng[]>> = {
   },
   "NATO Eastern Flank": {
     missile:[[54.710,20.452],[53.900,27.559]],
+    surface:[[54.710,20.452],[55.164,18.823]],
+    aircraft:[[54.710,20.452],[53.900,27.559]],
     airDefense:[[54.710,20.452]],
     cyber:[[53.900,27.559]],
     ground:[[53.669,23.814],[54.311,22.303]],
@@ -136,6 +140,8 @@ const opponentPositions: Record<string, Record<string, LatLng[]>> = {
     default:[[54.710,20.452],[53.900,27.559],[53.669,23.814]],
   },
   "Embassy Evacuation": {
+    surface:[[33.263,44.235],[33.315,44.357]],
+    aircraft:[[33.283,44.491],[33.341,44.394]],
     airDefense:[[33.263,44.235]],
     ground:[[33.315,44.357]],
     information:[[33.341,44.394]],
@@ -144,6 +150,8 @@ const opponentPositions: Record<string, Record<string, LatLng[]>> = {
     default:[[33.263,44.235],[33.315,44.357],[33.341,44.394]],
   },
   "Cyber Infrastructure": {
+    surface:[[40.713,-74.006],[40.858,-74.164]],
+    aircraft:[[40.758,-73.986],[40.736,-74.172]],
     cyber:[[40.713,-74.006],[40.736,-74.172]],
     infrastructure:[[40.858,-74.164],[40.735,-74.172]],
     information:[[40.758,-73.986]],
@@ -177,7 +185,9 @@ function opponentName(asset?: OpponentAsset) {
 
 function opponentRole(asset?: OpponentAsset) {
   const text = `${asset?.name || ""} ${asset?.category || ""}`.toLowerCase();
-  if (text.includes("submarine") || text.includes("naval") || text.includes("sea")) return "submarine";
+  if (text.includes("submarine") || text.includes("yuan") || text.includes("undersea")) return "submarine";
+  if (text.includes("destroyer") || text.includes("frigate") || text.includes("carrier") || text.includes("surface combatant") || text.includes("surface vessel") || text.includes("naval")) return "surface";
+  if (text.includes("fighter") || text.includes("aircraft") || text.includes("j-20") || text.includes("air ") || text.includes("stealth")) return "aircraft";
   if (text.includes("air defense") || text.includes("air-defense") || text.includes("s-300") || text.includes("iad")) return "airDefense";
   if (text.includes("missile") || text.includes("fires") || text.includes("artillery") || text.includes("rocket")) return "missile";
   if (text.includes("cyber") || text.includes("electronic")) return "cyber";
@@ -191,6 +201,8 @@ function opponentIcon(asset?: OpponentAsset) {
   const role = opponentRole(asset);
   if (role === "missile") return "🚀";
   if (role === "submarine") return "◆";
+  if (role === "surface") return "⚓";
+  if (role === "aircraft") return "✈️";
   if (role === "airDefense") return "▲";
   if (role === "cyber") return "⚡";
   if (role === "information") return "◈";
@@ -199,15 +211,42 @@ function opponentIcon(asset?: OpponentAsset) {
   return "◆";
 }
 
-function opponentPoint(scenario: string, asset: OpponentAsset | undefined, index: number): LatLng {
+function pointKey(point: LatLng) {
+  return `${point[0].toFixed(3)},${point[1].toFixed(3)}`;
+}
+
+function rawOpponentCandidates(scenario: string, asset: OpponentAsset | undefined): LatLng[] {
   const role = opponentRole(asset);
   const scenarioPositions = opponentPositions[scenario] || opponentPositions["Taiwan Strait 2027"];
-  const points = scenarioPositions[role] || scenarioPositions.default;
-  if (points?.length) return points[index % points.length];
+  return [...(scenarioPositions[role] || []), ...(scenarioPositions.default || [])];
+}
+
+function offsetOpponentPoint(point: LatLng, index: number): LatLng {
+  const ring = Math.floor(index / 6) + 1;
+  const angle = index * 2.399963229728653;
+  return [
+    point[0] + Math.sin(angle) * 0.18 * ring,
+    point[1] + Math.cos(angle) * 0.22 * ring,
+  ];
+}
+
+function opponentPoint(scenario: string, asset: OpponentAsset | undefined, index: number, assets: OpponentAsset[] = []): LatLng {
+  const used = new Set<string>();
+  for (let previous = 0; previous < index; previous += 1) {
+    const previousCandidates = rawOpponentCandidates(scenario, assets[previous]);
+    const previousPoint = previousCandidates[previous % Math.max(1, previousCandidates.length)] || offsetOpponentPoint((mapCfg[scenario] || mapCfg["Taiwan Strait 2027"]).center, previous);
+    used.add(pointKey(previousPoint));
+  }
+
+  const points = rawOpponentCandidates(scenario, asset);
+  for (let attempt = 0; attempt < points.length; attempt += 1) {
+    const point = points[(index + attempt) % points.length];
+    if (!used.has(pointKey(point))) return point;
+  }
 
   const cfg = mapCfg[scenario] || mapCfg["Taiwan Strait 2027"];
   const base = cfg.red?.[index % Math.max(1, cfg.red.length)] || cfg.center;
-  return [base[0], base[1]];
+  return offsetOpponentPoint([base[0], base[1]], index);
 }
 
 function matchOpponentAssetIndex(assets: OpponentAsset[], action: Action) {
@@ -366,7 +405,7 @@ function assetPoint(scenario: string, action: Action, index: number): LatLng {
 
 function redTargetPoint(scenario: string, action: Action, opponentAssets: OpponentAsset[]): LatLng {
   const opponentIndex = matchOpponentAssetIndex(opponentAssets, action);
-  if (opponentIndex >= 0) return opponentPoint(scenario, opponentAssets[opponentIndex], opponentIndex);
+  if (opponentIndex >= 0) return opponentPoint(scenario, opponentAssets[opponentIndex], opponentIndex, opponentAssets);
 
   const cfg = mapCfg[scenario] || mapCfg["Taiwan Strait 2027"];
   const red = cfg.red || [];
@@ -506,7 +545,7 @@ export default function GamePage() {
     });
 
     opponentAssets.forEach((asset, index) => {
-      const point = opponentPoint(scenario, asset, index);
+      const point = opponentPoint(scenario, asset, index, opponentAssets);
       const name = `${index + 1}. ${opponentName(asset)}`;
       const marker = L.marker(point, {
         icon:icon(`red opponent role-${opponentRole(asset)}`, opponentIcon(asset), index + 1),
@@ -533,7 +572,7 @@ export default function GamePage() {
 
     if (actions.length) {
       const points = actions.map((action, index) => assetPoint(scenario, action, index));
-      const redPoints = opponentAssets.map((asset, index) => opponentPoint(scenario, asset, index));
+      const redPoints = opponentAssets.map((asset, index) => opponentPoint(scenario, asset, index, opponentAssets));
       try {
         map.fitBounds(L.latLngBounds([...points, ...redPoints]).pad(0.22), { animate:false, maxZoom:cfg.zoom + 1 });
       } catch {}
