@@ -120,13 +120,41 @@ Frontend runs at `http://localhost:3000`
 
 ---
 
-## Architecture
+## Architecture Diagram
 
 ```
-Frontend    Next.js 15 + TypeScript
-Backend     FastAPI + Python 3.11
-AI          Gemini Flash (google/gemini-2.0-flash-exp:free) via OpenRouter
-Map         Leaflet.js + CartoDB dark tiles
+┌─────────────────────────────────────────────────────────────────┐
+│                        PRESENTATION LAYER                       │
+│                   Next.js 15 + TypeScript                       │
+│                                                                 │
+│  /              /assets          /game           /autopsy       │
+│  Scenario       Asset select     Tactical map    7-tab report   │
+│  selector       OSINT panel      Ghost Council   Timeline A/B   │
+│  Plan editor    Budget system    Action dock     Failure chain  │
+└────────────────────────────┬────────────────────────────────────┘
+                             │ REST / JSON
+┌────────────────────────────▼────────────────────────────────────┐
+│                          API LAYER                              │
+│                   FastAPI + Python 3.11                         │
+│                                                                 │
+│  POST /games      →  FOGLINE extraction                         │
+│  POST /turn       →  Ghost Council + adjudication               │
+│  POST /intel      →  OSINT threat briefing                      │
+│  GET  /autopsy    →  7-section failure report                   │
+│  GET  /health     →  status                                     │
+└──────┬──────────────────┬───────────────────┬───────────────────┘
+       │                  │                   │
+┌──────▼──────┐  ┌────────▼────────┐  ┌──────▼──────────────────┐
+│  AI ENGINE  │  │  GAME ENGINE    │  │     DATA SOURCES        │
+│             │  │                 │  │                         │
+│ Gemini Flash│  │ extraction.py   │  │ CDB90 conflict DB       │
+│ via         │  │ ghost.py        │  │ IISS Military Balance   │
+│ OpenRouter  │  │ adjudication.py │  │ Jane's Defence Weekly   │
+│ (free tier) │  │ cascade.py      │  │ ONI Annual Report       │
+│             │  │ autopsy.py      │  │ CSIS AMTI               │
+│             │  │ intel.py        │  │ Correlates of War       │
+└─────────────┘  └─────────────────┘  │ JP 5-0 / FM 6-0        │
+                                       └─────────────────────────┘
 ```
 
 ### Backend modules
