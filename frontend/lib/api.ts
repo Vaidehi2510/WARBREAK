@@ -61,7 +61,20 @@ export const API_BASE = (
 ).replace(/\/$/, "");
 
 async function safeJson(res: Response) {
-  if (!res.ok) throw new Error(await res.text());
+  if (!res.ok) {
+    const text = await res.text();
+    try {
+      const data = JSON.parse(text);
+      const detail = data.detail;
+      if (typeof detail === "string") throw new Error(detail);
+      if (Array.isArray(detail)) {
+        throw new Error(detail.map((item) => item.msg || JSON.stringify(item)).join(" "));
+      }
+    } catch (e) {
+      if (e instanceof Error && e.message !== text) throw e;
+    }
+    throw new Error(text);
+  }
   return res.json();
 }
 
@@ -93,8 +106,28 @@ export async function getAutopsy(gameId: string) {
   return safeJson(res);
 }
 
+function assetName(asset: unknown) {
+  if (typeof asset === "string") return asset;
+  if (asset && typeof asset === "object") {
+    const candidate = asset as { name?: unknown; id?: unknown };
+    if (typeof candidate.name === "string") return candidate.name;
+    if (typeof candidate.id === "string") return candidate.id;
+  }
+  return "";
+}
+
 export async function identifyOpponentAssets(scenario: string, selectedAssets: unknown[]) {
-  const payload = { scenario, adversary: scenario.includes("NATO") ? "Russian forces" : scenario.includes("Embassy") ? "local hostile forces" : scenario.includes("Cyber") ? "state-backed cyber actor" : "PLA", blue_assets: selectedAssets };
+  const payload = {
+    scenario,
+    adversary: scenario.includes("NATO")
+      ? "Russian forces"
+      : scenario.includes("Embassy")
+        ? "local hostile forces"
+        : scenario.includes("Cyber")
+          ? "state-backed cyber actor"
+          : "PLA",
+    blue_assets: selectedAssets.map(assetName).filter(Boolean),
+  };
   const res = await fetch(`${API_BASE}/intel`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },

@@ -37,6 +37,11 @@ export default function AssetsPage() {
 
   const picked = useMemo(() => assets.filter(a => selected.includes(a.id)), [selected]);
   const spent  = picked.reduce((s, a) => s + a.cost, 0);
+  const remaining = Math.max(0, budget - spent);
+  const spentPct = budget > 0 ? Math.min(100, Math.round((spent / budget) * 100)) : 0;
+  const budgetFloor = Math.max(12, spent);
+  const opponentAssets = Array.isArray(brief?.predicted_assets) ? brief.predicted_assets : [];
+  const warnings = Array.isArray(brief?.key_warnings) ? brief.key_warnings : [];
 
   const toggle = (id: string) => {
     const next      = selected.includes(id) ? selected.filter(x => x !== id) : [...selected, id];
@@ -73,7 +78,7 @@ export default function AssetsPage() {
   return (
     <main className="assets-page">
       {/* Top bar */}
-      <div className="topbar" style={{ margin:"-24px -32px 20px" }}>
+      <div className="topbar assets-topbar">
         <div className="brand">
           <button className="btn ghost" onClick={() => router.push("/")}>← BACK</button>
           WARBREAK
@@ -83,68 +88,107 @@ export default function AssetsPage() {
       </div>
 
       {/* Budget row */}
-      <div className="budget-row" style={{ marginBottom:16 }}>
+      <div className="budget-row">
         <div>
           <div className="kicker" style={{ fontSize:10, marginBottom:4 }}>CHOOSE YOUR FORCE PACKAGE</div>
           <p className="small" style={{ margin:0, opacity:0.6, fontSize:11 }}>
             Higher budget = more assets. Turns equal your selected assets.
           </p>
         </div>
-        <div style={{ display:"flex", alignItems:"center", gap:12 }}>
-          <span className="badge" style={{ fontSize:11 }}>BUDGET {budget} · SPENT {spent}</span>
-          <span className="badge" style={{ fontSize:11, background:"rgba(0,232,122,0.15)", border:"1px solid rgba(0,232,122,0.3)" }}>
-            {picked.length} TURNS
-          </span>
+        <div className="budget-console" aria-label="Force package budget">
+          <div className="budget-stats">
+            <span className="budget-stat">
+              <small>BUDGET</small>
+              <b>{budget}</b>
+            </span>
+            <span className="budget-stat spent">
+              <small>SPENT</small>
+              <b>{spent}</b>
+            </span>
+            <span className={`budget-stat ${remaining <= 2 ? "tight" : "left"}`}>
+              <small>LEFT</small>
+              <b>{remaining}</b>
+            </span>
+            <span className="budget-stat turns">
+              <small>TURNS</small>
+              <b>{picked.length}</b>
+            </span>
+          </div>
+          <div className="budget-meter" aria-hidden="true">
+            <span style={{ width:`${spentPct}%` }} />
+          </div>
         </div>
-        <input type="range" min="12" max="60" value={budget} onChange={e => setBudget(Number(e.target.value))} />
+        <label className="budget-slider-wrap">
+          <span>ADJUST BUDGET</span>
+          <input
+            type="range"
+            min={budgetFloor}
+            max="60"
+            value={budget}
+            aria-label="Adjust mission budget"
+            onChange={e => setBudget(Math.max(Number(e.target.value), budgetFloor))}
+          />
+        </label>
       </div>
 
-      <div className="assets-grid">
-        {/* Asset grid */}
-        <section className="asset-list">
-          {assets.map(a => {
-            const isSel  = selected.includes(a.id);
-            const tColor = TYPE_COLOR[a.type] || "#888";
-            return (
-              <button
-                key={a.id}
-                onClick={() => toggle(a.id)}
-                style={{
-                  position:"relative", padding:"12px 14px", textAlign:"left",
-                  borderRadius:10,
-                  border:`1.5px solid ${isSel ? tColor+"80" : "rgba(255,255,255,0.12)"}`,
-                  background: isSel ? `${tColor}18` : "rgba(255,255,255,0.05)",
-                  cursor:"pointer", transition:"all 0.18s ease", color:"inherit",
-                  display:"flex", flexDirection:"column", gap:4,
-                }}
-              >
-                <span style={{ position:"absolute", top:8, right:10, fontSize:10, fontWeight:700, color:isSel?tColor:"rgba(255,255,255,0.4)" }}>{a.cost}</span>
-                <span style={{ fontSize:20, lineHeight:1, marginBottom:2 }}>{a.icon}</span>
-                <span style={{ fontSize:12, fontWeight:700, lineHeight:1.25, color:isSel?tColor:"rgba(255,255,255,0.85)" }}>{a.name}</span>
-                <span style={{ fontSize:11, opacity:0.55, lineHeight:1.4 }}>{a.desc}</span>
-                <span style={{ marginTop:4, display:"inline-block", fontSize:9, padding:"2px 7px", borderRadius:3, background:`${tColor}20`, color:tColor, border:`1px solid ${tColor}30` }}>
-                  {a.type.toUpperCase()}
-                </span>
-              </button>
-            );
-          })}
-        </section>
+      {!brief ? (
+        <div className="assets-grid">
+          {/* Asset grid */}
+          <section className="asset-list">
+            {assets.map(a => {
+              const isSel  = selected.includes(a.id);
+              const tColor = TYPE_COLOR[a.type] || "#888";
+              const wouldExceed = !isSel && a.cost > remaining;
+              const overBy = Math.max(0, a.cost - remaining);
+              return (
+                <button
+                  key={a.id}
+                  onClick={() => toggle(a.id)}
+                  disabled={wouldExceed}
+                  aria-pressed={isSel}
+                  aria-label={`${a.name}. Cost ${a.cost}. ${isSel ? "Selected." : wouldExceed ? `Needs ${overBy} more budget.` : "Available."}`}
+                  className={`asset-pick-card ${isSel ? "selected" : ""} ${wouldExceed ? "unavailable" : ""}`}
+                  style={{
+                    border:`1.5px solid ${isSel ? tColor+"80" : "rgba(255,255,255,0.12)"}`,
+                    background: isSel ? `${tColor}18` : "rgba(255,255,255,0.05)",
+                  }}
+                >
+                  <span className={`cost-pill ${isSel ? "selected" : ""}`} style={{ borderColor:`${tColor}42`, color:isSel?tColor:"rgba(241,234,210,0.74)" }}>
+                    <small>COST</small>
+                    <b>{a.cost}</b>
+                  </span>
+                  <span style={{ fontSize:20, lineHeight:1, marginBottom:2 }}>{a.icon}</span>
+                  <span style={{ fontSize:12, fontWeight:700, lineHeight:1.25, color:isSel?tColor:"rgba(255,255,255,0.85)" }}>{a.name}</span>
+                  <span style={{ fontSize:11, opacity:0.55, lineHeight:1.4 }}>{a.desc}</span>
+                  <div className="asset-card-foot">
+                    <span style={{ display:"inline-block", fontSize:9, padding:"2px 7px", borderRadius:3, background:`${tColor}20`, color:tColor, border:`1px solid ${tColor}30` }}>
+                      {a.type.toUpperCase()}
+                    </span>
+                    {wouldExceed && <span className="asset-unavailable">NEED +{overBy}</span>}
+                  </div>
+                </button>
+              );
+            })}
+          </section>
 
-        {/* Sidebar */}
-        <aside>
+          {/* Sidebar */}
+          <aside>
           {/* Your forces */}
           <div className="side-panel">
             <h2 style={{ marginTop:0, fontSize:15, marginBottom:10 }}>Your forces</h2>
             <div style={{ display:"flex", flexWrap:"wrap", gap:6 }}>
               {picked.map(a => (
-                <span key={a.id} className="chip" style={{ fontSize:11 }}>{a.icon} {a.name}</span>
+                <span key={a.id} className="chip force-chip" style={{ fontSize:11 }}>
+                  <span>{a.icon} {a.name}</span>
+                  <b>{a.cost}</b>
+                </span>
               ))}
               {picked.length === 0 && <span style={{ fontSize:11, opacity:0.4 }}>No assets selected</span>}
             </div>
-            <div style={{ marginTop:12, padding:"8px 10px", background:"rgba(0,232,122,0.08)", border:"1px solid rgba(0,232,122,0.2)", borderRadius:7 }}>
-              <span style={{ fontSize:11, color:"#00e87a" }}>
-                {picked.length} assets selected = {picked.length} turns in the wargame
-              </span>
+            <div className="force-summary">
+              <span><b>{spent}</b> / {budget} used</span>
+              <span><b>{remaining}</b> left</span>
+              <span><b>{picked.length}</b> turns</span>
             </div>
           </div>
 
@@ -180,68 +224,6 @@ export default function AssetsPage() {
             </div>
           )}
 
-          {!loading && brief && (
-            <div className="side-panel" style={{ marginTop:12 }}>
-              {/* Classification banner */}
-              {brief.classification && (
-                <div style={{ marginBottom:10, padding:"5px 10px", background:"rgba(255,60,60,0.1)", border:"1px solid rgba(255,60,60,0.25)", borderRadius:5, textAlign:"center" }}>
-                  <span style={{ fontSize:10, color:"#ff8888", letterSpacing:"0.1em" }}>{brief.classification}</span>
-                </div>
-              )}
-
-              {/* Threat + confidence */}
-              {(brief.threat_level || brief.confidence) && (
-                <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8, marginBottom:12 }}>
-                  {brief.threat_level && (
-                    <div style={{ padding:"8px 10px", background:"rgba(255,60,60,0.08)", border:"1px solid rgba(255,60,60,0.2)", borderRadius:7 }}>
-                      <div style={{ fontSize:9, opacity:0.5, marginBottom:3 }}>THREAT LEVEL</div>
-                      <div style={{ fontSize:16, fontWeight:700, color:"#ff8888" }}>{brief.threat_level}</div>
-                    </div>
-                  )}
-                  {brief.confidence && (
-                    <div style={{ padding:"8px 10px", background:"rgba(255,170,0,0.08)", border:"1px solid rgba(255,170,0,0.2)", borderRadius:7 }}>
-                      <div style={{ fontSize:9, opacity:0.5, marginBottom:3 }}>CONFIDENCE</div>
-                      <div style={{ fontSize:16, fontWeight:700, color:"#ffaa00" }}>{brief.confidence}%</div>
-                    </div>
-                  )}
-                </div>
-              )}
-
-              <h2 style={{ marginTop:0, fontSize:14, marginBottom:8 }}>Likely opponent package</h2>
-
-              {brief.summary && (
-                <p style={{ fontSize:12, opacity:0.75, lineHeight:1.6, marginBottom:12 }}>{brief.summary}</p>
-              )}
-
-              {(brief.predicted_assets || []).map((x: any, i: number) => (
-                <div key={i} style={{ marginBottom:8, padding:"9px 11px", background:"rgba(255,60,60,0.06)", border:"1px solid rgba(255,60,60,0.15)", borderRadius:7 }}>
-                  <div style={{ fontSize:12, fontWeight:700, marginBottom:3, color:"#ffaaaa" }}>{x.name}</div>
-                  <div style={{ fontSize:10, opacity:0.6, marginBottom:3 }}>
-                    Confidence {x.confidence || "—"}% · Threat {x.threat_to_blue || "Medium"}
-                  </div>
-                  <div style={{ fontSize:11, opacity:0.7, marginBottom:3 }}>{x.capability}</div>
-                  <div style={{ fontSize:10, opacity:0.5 }}>Counter: {x.counter}</div>
-                </div>
-              ))}
-
-              {(brief.key_warnings || []).length > 0 && (
-                <div style={{ marginTop:10, padding:"8px 10px", background:"rgba(255,170,0,0.06)", border:"1px solid rgba(255,170,0,0.2)", borderRadius:7 }}>
-                  <div style={{ fontSize:9, fontWeight:700, color:"#ffaa00", marginBottom:6, letterSpacing:"0.08em" }}>KEY WARNINGS</div>
-                  {(brief.key_warnings || []).map((w: string, i: number) => (
-                    <p key={i} style={{ fontSize:11, opacity:0.7, margin:"0 0 4px", lineHeight:1.5 }}>• {w}</p>
-                  ))}
-                </div>
-              )}
-
-              {(brief.historical_precedent) && (
-                <div style={{ marginTop:10, padding:"8px 10px", background:"rgba(255,255,255,0.03)", border:"1px solid rgba(255,255,255,0.08)", borderRadius:7 }}>
-                  <div style={{ fontSize:9, opacity:0.4, marginBottom:4, letterSpacing:"0.08em" }}>HISTORICAL PRECEDENT</div>
-                  <p style={{ fontSize:11, opacity:0.6, margin:0, lineHeight:1.6, fontStyle:"italic" }}>{brief.historical_precedent}</p>
-                </div>
-              )}
-            </div>
-          )}
-
           {/* Placeholder when nothing fetched yet */}
           {!loading && !brief && (
             <div className="side-panel" style={{ marginTop:12, opacity:0.4, textAlign:"center", padding:"24px 16px" }}>
@@ -250,8 +232,107 @@ export default function AssetsPage() {
             </div>
           )}
 
-        </aside>
-      </div>
+          </aside>
+        </div>
+      ) : (
+        <section className="matchup-view">
+          <div className="matchup-hero">
+            <div>
+              <div className="kicker" style={{ fontSize:10, marginBottom:8 }}>
+                {brief.classification || "PUBLIC-SOURCE ESTIMATE"}
+              </div>
+              <h1>Force Package Matchup</h1>
+              {brief.summary && <p>{brief.summary}</p>}
+            </div>
+            <div className="matchup-meta">
+              {brief.threat_level && (
+                <div className="matchup-stat red">
+                  <span>Threat Level</span>
+                  <b>{brief.threat_level}</b>
+                </div>
+              )}
+              {brief.confidence && (
+                <div className="matchup-stat amber">
+                  <span>Confidence</span>
+                  <b>{brief.confidence}%</b>
+                </div>
+              )}
+              <button className="btn ghost" onClick={() => setBrief(null)}>REVISE PACKAGE</button>
+              <button className="btn primary" onClick={identify} disabled={loading}>
+                {loading ? "REFRESHING..." : "REFRESH ESTIMATE"}
+              </button>
+            </div>
+          </div>
+
+          <div className="matchup-columns">
+            <div className="matchup-column blue">
+              <div className="matchup-title">
+                <span>BLUE SELECTED PACKAGE</span>
+                <b>{picked.length} assets · {spent} points</b>
+              </div>
+              <div className={`matchup-card-grid blue-package-grid ${picked.length % 2 === 1 ? "odd" : ""}`}>
+                {picked.map(a => {
+                  const tColor = TYPE_COLOR[a.type] || "#888";
+                  return (
+                    <article className="force-card blue-card" key={a.id} style={{ borderColor:`${tColor}75` }}>
+                      <div className="force-card-top">
+                        <span className="force-icon">{a.icon}</span>
+                        <span className="force-cost">{a.cost}</span>
+                      </div>
+                      <h3 style={{ color:tColor }}>{a.name}</h3>
+                      <p>{a.desc}</p>
+                      <span className="force-tag" style={{ color:tColor, borderColor:`${tColor}45`, background:`${tColor}18` }}>
+                        {a.type.toUpperCase()}
+                      </span>
+                    </article>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="matchup-column red">
+              <div className="matchup-title">
+                <span>ESTIMATED OPPONENT PACKAGE</span>
+                <b>{opponentAssets.length} likely assets</b>
+              </div>
+              <div className="matchup-card-grid">
+                {opponentAssets.map((x: any, i: number) => (
+                  <article className="force-card red-card" key={`${x.name || "asset"}-${i}`}>
+                    <div className="force-card-top">
+                      <span className="force-icon">◆</span>
+                      <span className="force-cost">{x.confidence || "—"}%</span>
+                    </div>
+                    <h3>{x.name || "Unidentified asset"}</h3>
+                    <p>{x.capability || x.quantity || "Likely asset based on the selected force package."}</p>
+                    <div className="force-card-detail">
+                      <span>{x.category || "asset"}</span>
+                      <span>Threat {x.threat_to_blue || "MEDIUM"}</span>
+                    </div>
+                    {x.counter && <p className="counter-text">Counter: {x.counter}</p>}
+                  </article>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          {(warnings.length > 0 || brief.historical_precedent) && (
+            <div className="matchup-notes">
+              {warnings.length > 0 && (
+                <div>
+                  <h3>Key Warnings</h3>
+                  {warnings.map((w: string, i: number) => <p key={i}>{w}</p>)}
+                </div>
+              )}
+              {brief.historical_precedent && (
+                <div>
+                  <h3>Historical Precedent</h3>
+                  <p>{brief.historical_precedent}</p>
+                </div>
+              )}
+            </div>
+          )}
+        </section>
+      )}
     </main>
   );
 }

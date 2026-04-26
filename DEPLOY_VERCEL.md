@@ -14,8 +14,15 @@ This uses Vercel Services so the Next.js frontend and FastAPI backend are built 
 2. Keep **Root Directory** as repository root (`.`).
 3. Set **Application Preset** to **Services**.
 4. Do not set the root directory to `frontend/`; the root `vercel.json` deploys both services.
-5. Add environment variable:
-   - `OPENROUTER_API_KEY` = your OpenRouter key
+5. Add environment variables for the provider fallback chain:
+   - `LLM_PROVIDER_ORDER` = `openrouter,gemini,openai`
+   - `OPENROUTER_API_KEY` = your OpenRouter API key, if used
+   - `OPENROUTER_MODEL` = `openai/gpt-4o-mini`
+   - `GEMINI_API_KEY` = your Gemini API key, if used
+   - `GEMINI_MODEL` = `gemini-2.5-flash`
+   - `GEMINI_REASONING_EFFORT` = `none`
+   - `OPENAI_API_KEY` = your OpenAI API key, if used as fallback
+   - `OPENAI_MODEL` = `gpt-5.4-mini`
 6. Leave `NEXT_PUBLIC_API_URL` unset in Vercel so the frontend uses Vercel's generated `NEXT_PUBLIC_BACKEND_URL` service route.
 7. Deploy.
 
@@ -46,7 +53,7 @@ The frontend defaults to same-origin API calls.
 - For single-project deploy, you can leave `NEXT_PUBLIC_API_URL` unset.
 
 For local development, keep using:
-- `frontend/.env.local` with `NEXT_PUBLIC_API_URL=http://localhost:8000`
+- `frontend/.env.local` with `NEXT_PUBLIC_API_URL=http://127.0.0.1:8020`
 
 ## 4) Verify end-to-end
 
@@ -58,7 +65,8 @@ For local development, keep using:
    - `POST /api/intel`
    - `GET /api/autopsy/{game_id}`
 4. Confirm deployment env is valid:
-   - `GET /api/health/startup` should return 200 and `openrouter_configured: true`
+   - `GET /api/health/startup` should return 200 and show at least one configured provider.
+   - `GET /api/health` should show the active fallback order and models without exposing keys.
 
 ## Notes
 
