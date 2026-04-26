@@ -34,17 +34,23 @@ export async function getAutopsy(gameId: string) {
 }
 
 export async function identifyOpponentAssets(scenario: string, selectedAssets: any[]) {
-  const payload = { scenario, adversary: scenario.includes("NATO") ? "Russian forces" : scenario.includes("Embassy") ? "local hostile forces" : scenario.includes("Cyber") ? "state-backed cyber actor" : "PLA", blue_assets: selectedAssets };
-  const paths = ["/intel", "/api/intel", "/opponent-assets"];
-  for (const path of paths) {
-    try {
-      const res = await fetch(`${API_BASE}${path}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-      if (res.ok) return res.json();
-    } catch (_) {}
-  }
-  return null;
+  const adversary = scenario.includes("NATO") ? "Russian forces" 
+    : scenario.includes("Embassy") ? "local hostile forces" 
+    : scenario.includes("Cyber") ? "state-backed cyber actor" 
+    : "PLA";
+  
+  const payload = { 
+    scenario, 
+    adversary, 
+    blue_assets: selectedAssets.map((a: any) => a.name || a) 
+  };
+
+  const res = await fetch(`${API_BASE}/intel`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  
+  if (!res.ok) throw new Error(`Intel API error: ${res.status}`);
+  return res.json();
 }
