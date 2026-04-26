@@ -66,6 +66,33 @@ const fallbackPlans: Record<string, string> = {
   "Cyber Infrastructure": "Deploy the selected response package to stabilize critical infrastructure. Restore priority systems, protect command networks, attribute the attack, and prevent cascading public confidence and service failures.",
 };
 
+const fallbackOpponentPackages: Record<string, OpponentAsset[]> = {
+  "Taiwan Strait 2027": [
+    { name:"Anti-ship missiles", category:"missile", confidence:85, threat_to_blue:"CRITICAL" },
+    { name:"Diesel-electric submarines", category:"naval", confidence:79, threat_to_blue:"HIGH" },
+    { name:"Integrated air defense", category:"air defense", confidence:83, threat_to_blue:"HIGH" },
+  ],
+  "NATO Eastern Flank": [
+    { name:"Long-range fires", category:"missile/artillery", confidence:74, threat_to_blue:"HIGH" },
+    { name:"Cyber disruption teams", category:"cyber", confidence:80, threat_to_blue:"HIGH" },
+    { name:"Deniable border forces", category:"ground", confidence:69, threat_to_blue:"MEDIUM" },
+  ],
+  "Embassy Evacuation": [
+    { name:"Mobile air-defense teams", category:"air defense", confidence:76, threat_to_blue:"HIGH" },
+    { name:"Roadblocks and militia patrols", category:"ground", confidence:82, threat_to_blue:"MEDIUM" },
+    { name:"Rumor/disinformation channels", category:"information", confidence:68, threat_to_blue:"MEDIUM" },
+  ],
+  "Cyber Infrastructure": [
+    { name:"Cyber intrusion cells", category:"cyber", confidence:82, threat_to_blue:"HIGH" },
+    { name:"Substation disruption teams", category:"infrastructure", confidence:74, threat_to_blue:"HIGH" },
+    { name:"Disinformation channels", category:"information", confidence:70, threat_to_blue:"MEDIUM" },
+  ],
+};
+
+function fallbackOpponentAssets(scenario: string): OpponentAsset[] {
+  return fallbackOpponentPackages[scenario] || fallbackOpponentPackages["Taiwan Strait 2027"];
+}
+
 const assetPositions: Record<string, Record<string, LatLng>> = {
   "Taiwan Strait 2027": {
     carrier:[25.2,122.1], sub:[23.9,122.6], f35:[26.1,127.7], patriot:[24.1,121.2],
@@ -413,7 +440,7 @@ export default function GamePage() {
     })();
     setScenario(sc);
     setAssetIds(ids);
-    setOpponentAssets(storedOpponentAssets);
+    setOpponentAssets(storedOpponentAssets.length ? storedOpponentAssets : fallbackOpponentAssets(sc));
     setDamageReports(storedDamageReports);
     setMaxTurns(Math.max(1, mt));
     setSelected(assetActions[ids[0]]?.key || "");
