@@ -1,74 +1,102 @@
-# Deploy WARBREAK on Vercel (Single Project)
+# Deploy WARBREAK on Vercel
 
-This repo is configured to deploy frontend and backend together under one Vercel URL.
+Deploy WARBREAK as two separate Vercel projects from the same GitHub repo.
 
-- Frontend: Next.js from `frontend/`
-- Backend: FastAPI routed through Vercel's Python runtime from `api/index.py`
+- Backend project: FastAPI, root directory `backend/`
+- Frontend project: Next.js, root directory `frontend/`
 
-Vercel will not run `uvicorn` as a long-lived process. The FastAPI app is exposed as a Python function and invoked on API requests.
-This uses Vercel Services so the Next.js frontend and FastAPI backend are built as one Vercel project.
+Deploy the backend first, then give the frontend the backend URL through `NEXT_PUBLIC_API_URL`.
 
-## 1) Create one Vercel project
+## 1) Backend Project
 
-1. Import this repository in Vercel.
-2. Keep **Root Directory** as repository root (`.`).
-3. Set **Application Preset** to **Services**.
-4. Do not set the root directory to `frontend/`; the root `vercel.json` deploys both services.
-5. Add environment variables for the provider fallback chain:
-   - `LLM_PROVIDER_ORDER` = `openrouter,gemini,openai`
-   - `OPENROUTER_API_KEY` = your OpenRouter API key, if used
-   - `OPENROUTER_MODEL` = `openai/gpt-4o-mini`
-   - `GEMINI_API_KEY` = your Gemini API key, if used
-   - `GEMINI_MODEL` = `gemini-2.5-flash`
-   - `GEMINI_REASONING_EFFORT` = `none`
-   - `OPENAI_API_KEY` = your OpenAI API key, if used as fallback
-   - `OPENAI_MODEL` = `gpt-5.4-mini`
-6. Leave `NEXT_PUBLIC_API_URL` unset in Vercel so the frontend uses Vercel's generated `NEXT_PUBLIC_BACKEND_URL` service route.
-7. Deploy.
+Create a Vercel project from `Nikhil123n/WARBREAK` with these settings:
 
-Vercel files used:
-- `vercel.json` (Services configuration for frontend + backend)
-- `api/index.py` (ASGI entrypoint)
-- `requirements.txt` (Python dependencies for the API runtime)
+- Root Directory: `backend`
+- Framework Preset: `FastAPI`
+- Build Command: leave default/empty
+- Install Command: leave default
 
-## 2) Routing behavior
+The backend uses [backend/vercel.json](backend/vercel.json). Vercel will install [backend/requirements.txt](backend/requirements.txt) and expose the FastAPI app from [backend/main.py](backend/main.py).
 
-These paths go to FastAPI through the `/api` service prefix:
-- `/api/health`
-- `/api/health/startup`
-- `/api/games`
-- `/api/games/{game_id}`
-- `/api/turn`
-- `/api/intel`
-- `/api/autopsy/{game_id}`
+The backend config sets `"buildCommand": null` so any stale dashboard build command, such as a frontend build command, is ignored for backend deployments.
 
-All other paths go to the Next.js frontend.
+Do not add a `functions.main.py` override. Current Vercel builds only match `functions` patterns against Serverless Functions inside an `api/` directory, while this backend uses the FastAPI preset's root `main.py` entrypoint.
 
-## 3) Frontend API base URL
+Set backend environment variables in Vercel:
 
-The frontend defaults to same-origin API calls.
+```env
+LLM_PROVIDER_ORDER=openrouter,gemini,openai
+OPENROUTER_API_KEY=
+OPENROUTER_MODEL=openai/gpt-4o-mini
+GEMINI_API_KEY=
+GEMINI_MODEL=gemini-2.5-flash
+GEMINI_REASONING_EFFORT=none
+OPENAI_API_KEY=
+OPENAI_MODEL=gpt-5.4-mini
+```
 
-- `frontend/lib/api.ts` uses `NEXT_PUBLIC_API_URL` if provided.
-- On Vercel Services, it uses `NEXT_PUBLIC_BACKEND_URL`, which Vercel injects as `/api`.
-- For single-project deploy, you can leave `NEXT_PUBLIC_API_URL` unset.
+Only the provider keys you use need values, but at least one provider key must be set for full gameplay.
 
-For local development, keep using:
-- `frontend/.env.local` with `NEXT_PUBLIC_API_URL=http://127.0.0.1:8020`
+After deployment, verify:
 
-## 4) Verify end-to-end
+- `https://YOUR-BACKEND.vercel.app/health`
+- `https://YOUR-BACKEND.vercel.app/health/startup`
 
-1. Open your Vercel URL.
+Backend API paths:
+
+- `/health`
+- `/health/startup`
+- `/games`
+- `/games/{game_id}`
+- `/turn`
+- `/intel`
+- `/autopsy/{game_id}`
+
+## 2) Frontend Project
+
+Create a second Vercel project from `Nikhil123n/WARBREAK` with these settings:
+
+- Root Directory: `frontend`
+- Framework Preset: `Next.js`
+- Build Command: `npm run build`
+- Install Command: leave default
+
+The frontend uses [frontend/vercel.json](frontend/vercel.json).
+
+Set this frontend environment variable:
+
+```env
+NEXT_PUBLIC_API_URL=https://YOUR-BACKEND.vercel.app
+```
+
+Do not add a trailing slash. Do not add `/api`; the backend routes are served from the backend domain root.
+Because `NEXT_PUBLIC_API_URL` is compiled into the Next.js build, redeploy the frontend after changing this value.
+
+After deployment, verify:
+
+1. Open the frontend Vercel URL.
 2. Submit a plan.
-3. Confirm the app can call:
-   - `POST /api/games`
-   - `POST /api/turn`
-   - `POST /api/intel`
-   - `GET /api/autopsy/{game_id}`
-4. Confirm deployment env is valid:
-   - `GET /api/health/startup` should return 200 and show at least one configured provider.
-   - `GET /api/health` should show the active fallback order and models without exposing keys.
+3. Confirm browser requests go to `https://YOUR-BACKEND.vercel.app/games`, `/turn`, `/intel`, and `/autopsy/{game_id}`.
 
-## Notes
+## Local Development
 
-- Backend state is in-memory, so sessions can reset on cold starts/redeploys.
-- If you later split services again, set `NEXT_PUBLIC_API_URL` to your backend domain.
+Backend:
+
+```bash
+cd backend
+python -m venv .venv
+.venv\Scripts\activate
+pip install -r requirements.txt
+uvicorn main:app --reload --port 8020
+```
+
+Frontend:
+
+```bash
+cd frontend
+npm install
+echo "NEXT_PUBLIC_API_URL=http://127.0.0.1:8020" > .env.local
+npm run dev -- --hostname 127.0.0.1 --port 3010
+```
+
+Open `http://127.0.0.1:3010`.

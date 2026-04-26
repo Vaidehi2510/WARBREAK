@@ -35,9 +35,9 @@ Open http://127.0.0.1:3010
 
 ## Deploy on Vercel
 
-This repo is configured for a single Vercel project that serves both:
-- Frontend from `frontend/`
-- Backend API from `backend/` through root routing
+This repo is configured for two separate Vercel projects:
+- Backend project rooted at `backend/`
+- Frontend project rooted at `frontend/`
 
 See [DEPLOY_VERCEL.md](DEPLOY_VERCEL.md) for the exact setup steps and required environment variables.
 
