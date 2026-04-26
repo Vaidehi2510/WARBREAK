@@ -64,9 +64,12 @@ export const API_BASE = (
 ).replace(/\/$/, "");
 
 async function safeJson(res: Response) {
+  const contentType = res.headers.get("content-type") || "";
+  const isJson = contentType.includes("application/json");
+
   if (!res.ok) {
     const text = await res.text();
-    try {
+    if (isJson) try {
       const data = JSON.parse(text);
       const detail = data.detail;
       if (typeof detail === "string") throw new Error(detail);
@@ -76,8 +79,16 @@ async function safeJson(res: Response) {
     } catch (e) {
       if (e instanceof Error && e.message !== text) throw e;
     }
-    throw new Error(text);
+    if (contentType.includes("text/html")) {
+      throw new Error(`API returned HTML instead of JSON from ${res.url}. Check frontend API proxy/backend URL.`);
+    }
+    throw new Error(text || `API request failed with status ${res.status}`);
   }
+
+  if (!isJson) {
+    throw new Error(`API returned ${contentType || "unknown content"} instead of JSON from ${res.url}.`);
+  }
+
   return res.json();
 }
 
