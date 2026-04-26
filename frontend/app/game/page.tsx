@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import L from "leaflet";
+import type { Map as LeafletMap } from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { playTurn } from "../../lib/api";
 
@@ -47,7 +47,8 @@ const metricNames = [
 export default function GamePage() {
   const router = useRouter();
   const mapRef  = useRef<HTMLDivElement>(null);
-  const leaflet = useRef<L.Map | null>(null);
+  const leaflet = useRef<LeafletMap | null>(null);
+  const leafletLib = useRef<any>(null);
 
   const [scenario,  setScenario]  = useState("Taiwan Strait 2027");
   const [turn,      setTurn]      = useState(1);
@@ -88,14 +89,25 @@ export default function GamePage() {
   // ── Map init ──────────────────────────────────────────────────────────────
   useEffect(() => {
     if (!mapRef.current || leaflet.current) return;
-    const sc   = localStorage.getItem("warbreak_scenario") || "Taiwan Strait 2027";
-    const cfg  = mapCfg[sc] || mapCfg["Taiwan Strait 2027"];
-    const m    = L.map(mapRef.current, { center: cfg.center, zoom: cfg.zoom, zoomControl:false, attributionControl:false, dragging:true, scrollWheelZoom:true });
-    leaflet.current = m;
-    L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", { subdomains:"abcd", maxZoom:19 }).addTo(m);
-    const icon = (cls: string, emoji: string) => L.divIcon({ html:`<div class="marker ${cls}">${emoji}</div>`, className:"", iconSize:[34,34], iconAnchor:[17,17] });
-    cfg.blue.forEach((p: any) => L.marker([p[0],p[1]], { icon:icon("blue",p[2]) }).addTo(m));
-    cfg.red.forEach((p: any)  => L.marker([p[0],p[1]], { icon:icon("red",p[2]) }).addTo(m));
+    let cancelled = false;
+
+    async function initMap() {
+      const L = await import("leaflet");
+      if (cancelled || !mapRef.current || leaflet.current) return;
+
+      leafletLib.current = L;
+      const sc   = localStorage.getItem("warbreak_scenario") || "Taiwan Strait 2027";
+      const cfg  = mapCfg[sc] || mapCfg["Taiwan Strait 2027"];
+      const m    = L.map(mapRef.current, { center: cfg.center, zoom: cfg.zoom, zoomControl:false, attributionControl:false, dragging:true, scrollWheelZoom:true });
+      leaflet.current = m;
+      L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", { subdomains:"abcd", maxZoom:19 }).addTo(m);
+      const icon = (cls: string, emoji: string) => L.divIcon({ html:`<div class="marker ${cls}">${emoji}</div>`, className:"", iconSize:[34,34], iconAnchor:[17,17] });
+      cfg.blue.forEach((p: any) => L.marker([p[0],p[1]], { icon:icon("blue",p[2]) }).addTo(m));
+      cfg.red.forEach((p: any)  => L.marker([p[0],p[1]], { icon:icon("red",p[2]) }).addTo(m));
+    }
+
+    initMap();
+    return () => { cancelled = true; };
   }, [scenario]);
 
   // ── Sound ─────────────────────────────────────────────────────────────────
@@ -118,8 +130,9 @@ export default function GamePage() {
     sound(cls==="explosion"?"boom":cls==="sonar"?"sonar":"cyber");
     setTimeout(() => setFx(f => f.filter(x => x.id !== id)), 1700);
     const cfg = mapCfg[scenario] || mapCfg["Taiwan Strait 2027"];
-    if (leaflet.current) {
-      leaflet.current.flyTo(cfg.red[0], cfg.zoom + 1, { duration:0.8 });
+    const L = leafletLib.current;
+    if (leaflet.current && L) {
+      leaflet.current.flyTo([cfg.red[0][0], cfg.red[0][1]], cfg.zoom + 1, { duration:0.8 });
       if (kind === "strike") {
         const from = cfg.blue[0], to = cfg.red[0];
         const line = L.polyline([[from[0],from[1]], [to[0],to[1]]], { color:"#e5d28c", weight:3, className:"arc" }).addTo(leaflet.current);

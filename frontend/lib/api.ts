@@ -1,4 +1,60 @@
-export const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+export type AssumptionStatus = "untested" | "stressed" | "broken" | "validated";
+
+export type Assumption = {
+  id: string;
+  text: string;
+  category: string;
+  confidence: number;
+  criticality: number;
+  fragility: number;
+  basis: string;
+  doctrine_ref: string;
+  dependencies: string[];
+  cascade_effect: string;
+  status: AssumptionStatus;
+  turn_broken?: number | null;
+};
+
+export type GameEvent = {
+  turn: number;
+  title: string;
+  description: string;
+  blue_move: string;
+  red_move: string;
+  ghost_reasoning: string;
+  ghost_state_text: string;
+  targeted_assumption_id: string;
+  broken_chain: string[];
+  metric_deltas: Record<string, number>;
+  options: string[];
+};
+
+export type GameState = {
+  id: string;
+  created_at: string;
+  plan: string;
+  assumptions: Assumption[];
+  turn: number;
+  max_turns: number;
+  metrics: Record<string, number>;
+  events: GameEvent[];
+  status: "active" | "failed" | "completed";
+  ghost_loss_aversion: number;
+  ghost_escalation_threshold: number;
+};
+
+export type AutopsyReport = {
+  status: string;
+  turns: number;
+  assumptions_broken: number;
+  assumptions_stressed: number;
+  final_metrics: Record<string, number>;
+  root_causes: string[];
+  recommendation: string;
+  report: string;
+};
+
+export const API_BASE = (process.env.NEXT_PUBLIC_API_URL || "").replace(/\/$/, "");
 
 async function safeJson(res: Response) {
   if (!res.ok) throw new Error(await res.text());
@@ -18,7 +74,7 @@ export async function playTurn(gameId: string, action: string) {
   const res = await fetch(`${API_BASE}/turn`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ game_id: gameId, blue_action: action, action }),
+    body: JSON.stringify({ game_id: gameId, player_action: action }),
   });
   return safeJson(res);
 }
@@ -33,18 +89,12 @@ export async function getAutopsy(gameId: string) {
   return safeJson(res);
 }
 
-export async function identifyOpponentAssets(scenario: string, selectedAssets: any[]) {
+export async function identifyOpponentAssets(scenario: string, selectedAssets: unknown[]) {
   const payload = { scenario, adversary: scenario.includes("NATO") ? "Russian forces" : scenario.includes("Embassy") ? "local hostile forces" : scenario.includes("Cyber") ? "state-backed cyber actor" : "PLA", blue_assets: selectedAssets };
-  const paths = ["/intel", "/api/intel", "/opponent-assets"];
-  for (const path of paths) {
-    try {
-      const res = await fetch(`${API_BASE}${path}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-      if (res.ok) return res.json();
-    } catch (_) {}
-  }
-  return null;
+  const res = await fetch(`${API_BASE}/intel`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  return safeJson(res);
 }
