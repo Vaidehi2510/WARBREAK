@@ -54,7 +54,11 @@ export type AutopsyReport = {
   report: string;
 };
 
-export const API_BASE = (process.env.NEXT_PUBLIC_API_URL || "").replace(/\/$/, "");
+export const API_BASE = (
+  process.env.NEXT_PUBLIC_API_URL ||
+  process.env.NEXT_PUBLIC_BACKEND_URL ||
+  "/api"
+).replace(/\/$/, "");
 
 async function safeJson(res: Response) {
   if (!res.ok) throw new Error(await res.text());
