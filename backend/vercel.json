@@ -3,9 +3,7 @@
   "framework": "fastapi",
   "functions": {
     "main.py": {
-      "includeFiles": [
-        "evidence_catalog.json"
-      ],
+      "includeFiles": "evidence_catalog.json",
       "maxDuration": 60
     }
   }
