@@ -13,7 +13,7 @@ class Assumption(BaseModel):
     fragility: int = Field(ge=0, le=100, default=60)
     basis: str = ""
     doctrine_ref: str = ""
-    dependencies: List[str] = []
+    dependencies: List[str] = Field(default_factory=list)
     cascade_effect: str = ""
     status: Literal["untested", "stressed", "broken", "validated"] = "untested"
     turn_broken: Optional[int] = None
@@ -27,9 +27,9 @@ class Event(BaseModel):
     ghost_reasoning: str = ""
     ghost_state_text: str = ""
     targeted_assumption_id: str = ""
-    broken_chain: List[str] = []
-    metric_deltas: Dict[str, int] = {}
-    options: List[str] = []
+    broken_chain: List[str] = Field(default_factory=list)
+    metric_deltas: Dict[str, int] = Field(default_factory=dict)
+    options: List[str] = Field(default_factory=list)
 
 class GameState(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid4()))
@@ -46,13 +46,14 @@ class GameState(BaseModel):
         "blue_strength": 100,
         "red_strength": 100,
     })
-    events: List[Event] = []
+    events: List[Event] = Field(default_factory=list)
     status: Literal["active", "failed", "completed"] = "active"
     ghost_loss_aversion: float = 0.8
     ghost_escalation_threshold: float = 0.45
 
 class NewGameRequest(BaseModel):
     plan: str
+    max_turns: int | None = None
 
 class TurnRequest(BaseModel):
     game_id: str

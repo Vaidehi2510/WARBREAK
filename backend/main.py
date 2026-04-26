@@ -66,6 +66,8 @@ def ai_http_error(exc: Exception) -> HTTPException:
             return HTTPException(502, message)
     if isinstance(exc, json.JSONDecodeError):
         return HTTPException(502, "LLM provider returned invalid JSON. Try again, or use a more explicit plan.")
+    if isinstance(exc, ValueError):
+        return HTTPException(502, str(exc))
     return HTTPException(500, "AI generation failed. Check the backend logs for details.")
 
 # ── Intel Briefing (OSINT prediction) ────────────────────────────────────────
@@ -92,7 +94,7 @@ def normalize_blue_assets(assets: List[Any]) -> List[str]:
 def intel_briefing(req: IntelRequest):
     try:
         return generate_intel_briefing(req.scenario, req.adversary, normalize_blue_assets(req.blue_assets))
-    except (APIStatusError, OpenAIError, RuntimeError, json.JSONDecodeError) as exc:
+    except (APIStatusError, OpenAIError, RuntimeError, json.JSONDecodeError, ValueError) as exc:
         raise ai_http_error(exc) from exc
 
 # ── FOGLINE compiler ──────────────────────────────────────────────────────────
@@ -107,9 +109,10 @@ def create_game(req: NewGameRequest):
         raise HTTPException(400, "Plan must be at least 20 characters.")
     try:
         assumptions = extract_assumptions(req.plan)
-    except (APIStatusError, OpenAIError, RuntimeError, json.JSONDecodeError) as exc:
+    except (APIStatusError, OpenAIError, RuntimeError, json.JSONDecodeError, ValueError) as exc:
         raise ai_http_error(exc) from exc
-    game = GameState(plan=req.plan, assumptions=assumptions)
+    max_turns = max(1, min(12, int(req.max_turns or 3)))
+    game = GameState(plan=req.plan, assumptions=assumptions, max_turns=max_turns)
     return save_game(game)
 
 @app.get("/games/{game_id}", response_model=GameState)
@@ -130,7 +133,7 @@ def play_turn(req: TurnRequest):
         raise HTTPException(400, f"Game is {game.status}. Fetch /autopsy/{req.game_id}")
     try:
         event = adjudicate(game, req.player_action)
-    except (APIStatusError, OpenAIError, RuntimeError, json.JSONDecodeError) as exc:
+    except (APIStatusError, OpenAIError, RuntimeError, json.JSONDecodeError, ValueError) as exc:
         raise ai_http_error(exc) from exc
     return save_game(apply_event(game, event))
 
@@ -143,5 +146,5 @@ def autopsy(game_id: str):
         raise HTTPException(404, "Game not found")
     try:
         return generate_autopsy(game)
-    except (APIStatusError, OpenAIError, RuntimeError, json.JSONDecodeError) as exc:
+    except (APIStatusError, OpenAIError, RuntimeError, json.JSONDecodeError, ValueError) as exc:
         raise ai_http_error(exc) from exc

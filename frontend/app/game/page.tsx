@@ -16,6 +16,26 @@ type OpponentAsset = {
   capability?: string;
   counter?: string;
 };
+type DamageReport = {
+  id: string;
+  turn: number;
+  action: string;
+  target: string;
+  resource: string;
+  damage: number;
+  residual: number;
+  recovery: string;
+  recoveryHours: number;
+  confidence: number;
+  severity: "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
+  effect: string;
+  aftershock: string;
+  source: string;
+  redDelta: number;
+  blueCost: number;
+  metricDeltas: Record<string, number>;
+  evidence: string[];
+};
 
 const assetActions: Record<string, Action> = {
   carrier:  { key:"carrier_strike",    title:"Carrier Strike Group",      desc:"Launch long-range air package.",         icon:"⚓",  asset:"carrier",  kind:"strike",  once:true },
@@ -38,15 +58,6 @@ const mapCfg: any = {
   "Embassy Evacuation": { center:[33.33,44.38], zoom:7, why:"Air corridors, roads, embassy access, harbor reach.",          label:"Capital zone",  red:[[33.45,44.45,"▰"],[33.28,44.54,"🚀"],[33.36,44.25,"⚡"]], blue:[[33.31,44.36,"🚁"],[33.25,44.31,"✦"],[33.5,44.1,"▣"]] },
   "Cyber Infrastructure": { center:[40.75,-74.3], zoom:6, why:"Substations, command networks, cascading infrastructure.",   label:"Northeast grid",red:[[40.72,-74.0,"⚡"],[41.1,-73.7,"▣"],[40.2,-75.1,"⚠️"]], blue:[[40.76,-73.9,"🛡️"],[40.4,-74.6,"⚡"],[41.0,-74.2,"🔎"]] },
 };
-
-const metricNames = [
-  ["intl_opinion","Intl opinion"],
-  ["us_domestic","US support"],
-  ["red_domestic","Red support"],
-  ["allied_confidence","Allied confidence"],
-  ["blue_strength","Blue force"],
-  ["red_strength","Red force"],
-];
 
 const fallbackPlans: Record<string, string> = {
   "Taiwan Strait 2027": "Deploy the selected force package to the Taiwan Strait. Preserve sea lanes through the Luzon Strait, coordinate regional basing and logistics, identify PLA coastal threats, and maintain allied support while avoiding uncontrolled escalation.",
@@ -76,29 +87,6 @@ const assetPositions: Record<string, Record<string, LatLng>> = {
     growler:[40.88,-74.08], p8:[41.0,-74.2], aegis:[40.62,-74.12], stryker:[40.68,-74.45],
     cyber:[40.76,-73.9], mq9:[40.82,-74.25], sof:[40.7,-74.32], sealift:[40.5,-74.1],
   },
-};
-
-const fallbackOpponentPackages: Record<string, OpponentAsset[]> = {
-  "Taiwan Strait 2027": [
-    { name:"Anti-ship missiles", category:"missile", confidence:85, threat_to_blue:"CRITICAL" },
-    { name:"Diesel-electric submarines", category:"naval", confidence:79, threat_to_blue:"HIGH" },
-    { name:"Integrated air defense", category:"air defense", confidence:83, threat_to_blue:"HIGH" },
-  ],
-  "NATO Eastern Flank": [
-    { name:"Long-range fires", category:"missile/artillery", confidence:74, threat_to_blue:"HIGH" },
-    { name:"Cyber disruption teams", category:"cyber", confidence:80, threat_to_blue:"HIGH" },
-    { name:"Deniable border forces", category:"ground", confidence:69, threat_to_blue:"MEDIUM" },
-  ],
-  "Embassy Evacuation": [
-    { name:"Mobile air-defense teams", category:"air defense", confidence:76, threat_to_blue:"HIGH" },
-    { name:"Roadblocks and militia patrols", category:"ground", confidence:82, threat_to_blue:"MEDIUM" },
-    { name:"Rumor/disinformation channels", category:"information", confidence:68, threat_to_blue:"MEDIUM" },
-  ],
-  "Cyber Infrastructure": [
-    { name:"Cyber intrusion cells", category:"cyber", confidence:82, threat_to_blue:"HIGH" },
-    { name:"Substation disruption teams", category:"infrastructure", confidence:74, threat_to_blue:"HIGH" },
-    { name:"Disinformation channels", category:"information", confidence:70, threat_to_blue:"MEDIUM" },
-  ],
 };
 
 const opponentPositions: Record<string, Record<string, LatLng[]>> = {
@@ -140,10 +128,6 @@ function escapeHtml(value: string) {
   return value.replace(/[&<>"']/g, (char) => ({
     "&":"&amp;", "<":"&lt;", ">":"&gt;", "\"":"&quot;", "'":"&#39;",
   }[char] || char));
-}
-
-function fallbackOpponentAssets(scenario: string): OpponentAsset[] {
-  return fallbackOpponentPackages[scenario] || fallbackOpponentPackages["Taiwan Strait 2027"];
 }
 
 function parseOpponentAssets(raw: string | null, scenario: string): OpponentAsset[] {
@@ -226,14 +210,100 @@ function localGhostCouncil(act: Action, redAsset: string, scenario: string) {
   return `Ghost Council: ${act.title} is credible, but not decisive. ${pressure[act.kind] || pressure.info} Expected red response: ${redAsset}. In ${scenario}, protect the assumption behind the move before committing the next package.`;
 }
 
-function localMetricPatch(kind: string) {
-  if (kind === "strike") return { red_strength:-6, intl_opinion:-3, allied_confidence:2 };
-  if (kind === "sub") return { red_strength:-3, allied_confidence:2 };
-  if (kind === "cyber") return { red_strength:-4, intl_opinion:-2 };
-  if (kind === "defense") return { blue_strength:2, us_domestic:2 };
-  if (kind === "ground") return { allied_confidence:2, us_domestic:1 };
-  if (kind === "sensor") return { allied_confidence:3, intl_opinion:1 };
-  return { intl_opinion:2, allied_confidence:2 };
+function pct(value: unknown, fallback = 0) {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? Math.max(0, Math.min(100, Math.round(numeric))) : fallback;
+}
+
+function metricDelta(value: unknown) {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? Math.round(numeric) : 0;
+}
+
+function formatDelta(value: number) {
+  if (value > 0) return `+${value}`;
+  return String(value);
+}
+
+function recoveryLabel(turns: number) {
+  if (turns <= 0) return "not confirmed";
+  return `${turns} turn${turns === 1 ? "" : "s"}`;
+}
+
+function resourceForTarget(action: Action, target: OpponentAsset | undefined) {
+  const category = target?.category?.trim();
+  if (category) return category;
+  return action.title;
+}
+
+function latestEventFrom(response: any) {
+  const events = Array.isArray(response?.events) ? response.events : [];
+  return events.length ? events[events.length - 1] : {};
+}
+
+function buildDamageReport(
+  action: Action,
+  target: OpponentAsset | undefined,
+  turn: number,
+  event: any,
+  beforeMetrics: Record<string, number>,
+  afterMetrics: Record<string, number>,
+  maxTurns: number,
+): DamageReport | null {
+  const deltas = Object.fromEntries(
+    Object.entries(event?.metric_deltas || {}).map(([key, value]) => [key, metricDelta(value)])
+  ) as Record<string, number>;
+  const previousRed = pct(beforeMetrics.red_strength, 100);
+  const currentRed = pct(afterMetrics.red_strength, previousRed + metricDelta(deltas.red_strength));
+  const previousBlue = pct(beforeMetrics.blue_strength, 100);
+  const currentBlue = pct(afterMetrics.blue_strength, previousBlue + metricDelta(deltas.blue_strength));
+  const damage = pct(Math.max(0, previousRed - currentRed));
+  const residual = currentRed;
+  const blueCost = pct(Math.max(0, previousBlue - currentBlue));
+  const confidence = pct(target?.confidence, event?.ghost_reasoning || event?.red_move ? 65 : 50);
+
+  if (!event?.turn && !Object.keys(deltas).length) return null;
+
+  const remainingTurns = Math.max(1, maxTurns - turn + 1);
+  const recoveryTurns = damage > 0
+    ? Math.max(1, Math.min(remainingTurns, Math.ceil((residual / Math.max(1, damage)) * ((100 - confidence) / 100 + 1))))
+    : 0;
+  const severity =
+    damage >= 65 ? "CRITICAL" :
+    damage >= 40 ? "HIGH" :
+    damage >= 15 ? "MEDIUM" :
+    "LOW";
+  const redMove = String(event?.red_move || "").trim();
+  const ghostReasoning = String(event?.ghost_reasoning || "").trim();
+  const capability = String(target?.capability || "").trim();
+  const counter = String(target?.counter || "").trim();
+  const evidence = [
+    `Red force ${formatDelta(currentRed - previousRed)} (${previousRed} -> ${currentRed})`,
+    `Blue force ${formatDelta(currentBlue - previousBlue)} (${previousBlue} -> ${currentBlue})`,
+    redMove ? `Opponent response: ${redMove}` : "",
+    capability ? `Target capability: ${capability}` : "",
+  ].filter((item): item is string => Boolean(item));
+
+  return {
+    id: `${turn}-${action.key}-${Date.now()}`,
+    turn,
+    action: action.title,
+    target: opponentName(target),
+    resource: resourceForTarget(action, target),
+    damage,
+    residual,
+    recovery: recoveryLabel(recoveryTurns),
+    recoveryHours: recoveryTurns,
+    confidence,
+    severity,
+    effect: evidence.slice(0, 2).join(" · "),
+    aftershock: ghostReasoning || counter || redMove,
+    source: "Backend turn metrics",
+    redDelta: currentRed - previousRed,
+    blueCost,
+    metricDeltas: deltas,
+    evidence,
+  };
 }
 
 function assetPoint(scenario: string, action: Action, index: number): LatLng {
@@ -301,6 +371,7 @@ export default function GamePage() {
   const [history,   setHistory]   = useState<any[]>([]);
   const [assetIds,  setAssetIds]  = useState<string[]>([]);
   const [opponentAssets, setOpponentAssets] = useState<OpponentAsset[]>([]);
+  const [damageReports, setDamageReports] = useState<DamageReport[]>([]);
   const [mapReady,  setMapReady]  = useState(false);
   const [busy,      setBusy]      = useState(false);
 
@@ -332,9 +403,18 @@ export default function GamePage() {
 
     const mt  = Number(localStorage.getItem("warbreak_max_turns") || ids.length || 5);
     const storedOpponentAssets = parseOpponentAssets(localStorage.getItem("warbreak_opponent_assets"), sc);
+    const storedDamageReports = (() => {
+      try {
+        const parsed = JSON.parse(localStorage.getItem("warbreak_damage_reports") || "[]");
+        return Array.isArray(parsed) ? parsed : [];
+      } catch {
+        return [];
+      }
+    })();
     setScenario(sc);
     setAssetIds(ids);
-    setOpponentAssets(storedOpponentAssets.length ? storedOpponentAssets : fallbackOpponentAssets(sc));
+    setOpponentAssets(storedOpponentAssets);
+    setDamageReports(storedDamageReports);
     setMaxTurns(Math.max(1, mt));
     setSelected(assetActions[ids[0]]?.key || "");
   }, [router]);
@@ -505,20 +585,30 @@ export default function GamePage() {
     setRedUsed(r => Array.from(new Set([...r, redAsset])));
 
     let ghostReply = "";
+    let metricsForStorage = metrics;
     try {
       let gid = localStorage.getItem("warbreak_game_id") || "";
-      if (!gid || gid === "local-demo") {
+      const storedGame = (() => {
+        try {
+          return JSON.parse(localStorage.getItem("warbreak_game") || "{}");
+        } catch {
+          return {};
+        }
+      })();
+      const storedMaxTurns = Number(storedGame?.max_turns || 0);
+      if (!gid || gid === "local-demo" || (storedMaxTurns > 0 && storedMaxTurns !== maxTurns)) {
         gid = await createPlayableGame(act);
       }
 
       let res;
+      const turnAction = `${act.title}: ${act.desc}`;
       try {
-        res = await playTurn(gid, act.title);
+        res = await playTurn(gid, turnAction);
       } catch (turnError) {
         const message = turnError instanceof Error ? turnError.message : "";
         if (!message.toLowerCase().includes("game not found")) throw turnError;
         gid = await createPlayableGame(act);
-        res = await playTurn(gid, act.title);
+        res = await playTurn(gid, turnAction);
       }
 
       // Extract ghost reasoning from all possible fields
@@ -531,18 +621,22 @@ export default function GamePage() {
       // Update metrics from response
       const newMetrics = res.metrics || res.game_state || {};
       if (Object.keys(newMetrics).length > 0) {
+        metricsForStorage = { ...metrics, ...newMetrics };
         setMetrics((m: any) => ({ ...m, ...newMetrics }));
+      }
+      const event = latestEventFrom(res);
+      const damageReport = buildDamageReport(act, targetOpponent, turn, event, metrics, metricsForStorage, maxTurns);
+      if (damageReport) {
+        setDamageReports(reports => {
+          const next = [damageReport, ...reports].slice(0, 4);
+          localStorage.setItem("warbreak_damage_reports", JSON.stringify(next));
+          return next;
+        });
       }
       localStorage.setItem("warbreak_game", JSON.stringify(res));
     } catch {
-      const patch = localMetricPatch(act.kind);
-      setMetrics((m: any) => {
-        const next = { ...m };
-        Object.entries(patch).forEach(([key, delta]) => {
-          next[key] = Math.max(0, Math.min(100, Math.round((next[key] ?? 50) + delta)));
-        });
-        return next;
-      });
+      setToast("Live BDA pending: backend turn data unavailable.");
+      setTimeout(() => setToast(""), 2200);
       ghostReply = localGhostCouncil(act, redAsset, scenario);
     }
 
@@ -557,7 +651,7 @@ export default function GamePage() {
 
     if (turn >= maxTurns) {
       localStorage.setItem("warbreak_history",  JSON.stringify([...history, { turn, action:act.title, red:redAsset, ghost:ghostReply }]));
-      localStorage.setItem("warbreak_metrics",  JSON.stringify(metrics));
+      localStorage.setItem("warbreak_metrics",  JSON.stringify(metricsForStorage));
       localStorage.setItem("warbreak_red_used", JSON.stringify(Array.from(new Set([...redUsed, redAsset]))));
       router.push("/autopsy");
     } else {
@@ -566,6 +660,16 @@ export default function GamePage() {
   };
 
   const cfg = mapCfg[scenario] || mapCfg["Taiwan Strait 2027"];
+  const latestDamage = damageReports[0];
+  const campaignDamage = latestDamage ? 100 - latestDamage.residual : 0;
+  const pressureState =
+    campaignDamage >= 72 ? "CASCADE" :
+    campaignDamage >= 48 ? "DEGRADED" :
+    campaignDamage >= 20 ? "DISRUPTED" :
+    "INTACT";
+  const followUpWindow = latestDamage
+    ? latestDamage.aftershock || `Reassess ${latestDamage.resource.toLowerCase()} inside ${latestDamage.recovery}.`
+    : "Board populates after live backend adjudication returns turn metrics.";
 
   const buildFallbackPlan = (act?: Action) => {
     const forceNames = actions.map(a => a.title).join(", ") || "the selected force package";
@@ -574,7 +678,7 @@ export default function GamePage() {
   };
 
   const createPlayableGame = async (act?: Action) => {
-    const game = await createGame(buildFallbackPlan(act));
+    const game = await createGame(buildFallbackPlan(act), maxTurns);
     const gameId = game.id || game.game_id || game.session_id;
     if (!gameId) throw new Error("Backend did not return a game id.");
     localStorage.setItem("warbreak_game_id", gameId);
@@ -635,20 +739,78 @@ export default function GamePage() {
 
         {/* Sidebar */}
         <aside className="sidebar">
-          {/* Metrics */}
-          <div className="side-card">
-            <h3 style={{ fontSize:13, marginTop:0, marginBottom:10 }}>Information battlefield</h3>
-            {metricNames.map(([k, n]) => (
-              <div className="metric" key={k}>
-                <div className="metric-head">
-                  <span style={{ fontSize:11 }}>{n}</span>
-                  <b style={{ fontSize:12 }}>{Math.round(metrics[k] ?? 50)}</b>
-                </div>
-                <div className="bar">
-                  <span style={{ width:`${Math.max(0, Math.min(100, metrics[k] ?? 50))}%` }} />
-                </div>
+          {/* Damage control board */}
+          <div className="side-card damage-board">
+            <div className="damage-board-head">
+              <div>
+                <span>DAMAGE CONTROL</span>
+                <h3>Battle Damage Board</h3>
               </div>
-            ))}
+              <b>{pressureState}</b>
+            </div>
+
+            {latestDamage ? (
+              <>
+                <div className="damage-board-hero">
+                  <div>
+                    <small>T{latestDamage.turn} · {latestDamage.resource}</small>
+                    <strong>{latestDamage.target}</strong>
+                    <p>{latestDamage.effect}</p>
+                  </div>
+                  <div
+                    className="damage-dial board-dial"
+                    style={{
+                      background:`conic-gradient(#d55348 0 ${latestDamage.damage}%, rgba(241,234,210,.14) ${latestDamage.damage}% 100%)`,
+                    }}
+                  >
+                    <strong>{latestDamage.damage}%</strong>
+                  </div>
+                </div>
+
+                <div className="damage-board-grid">
+                  <span><small>Effect</small><b>{latestDamage.damage}%</b></span>
+                  <span><small>Residual</small><b>{latestDamage.residual}%</b></span>
+                  <span><small>Red force Δ</small><b>{formatDelta(latestDamage.redDelta)}</b></span>
+                  <span><small>Blue cost</small><b>{latestDamage.blueCost}%</b></span>
+                  <span><small>Confidence</small><b>{latestDamage.confidence}%</b></span>
+                  <span><small>Recovery ETA</small><b>{latestDamage.recovery}</b></span>
+                </div>
+
+                <div className="follow-window">
+                  <span>ANALYST READ</span>
+                  <p>{followUpWindow}</p>
+                </div>
+
+                {latestDamage.evidence.length > 0 && (
+                  <div className="bda-evidence">
+                    {latestDamage.evidence.map((row, index) => (
+                      <span key={`${latestDamage.id}-e${index}`}>{row}</span>
+                    ))}
+                  </div>
+                )}
+
+                <div className="recovery-queue">
+                  {damageReports.slice(0, 3).map(report => (
+                    <div key={report.id}>
+                      <span>T{report.turn} · {report.resource}</span>
+                      <b>{formatDelta(report.redDelta)} red · {report.recovery}</b>
+                    </div>
+                  ))}
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="damage-board-empty">
+                  <b>Awaiting live BDA</b>
+                  <p>Execute a package. The board will populate only from backend turn metrics and the loaded opponent package estimate.</p>
+                </div>
+                <div className="damage-board-grid">
+                  <span><small>Source</small><b>Backend</b></span>
+                  <span><small>Target</small><b>Pending</b></span>
+                  <span><small>Status</small><b>Ready</b></span>
+                </div>
+              </>
+            )}
           </div>
 
           {/* Ghost Council */}

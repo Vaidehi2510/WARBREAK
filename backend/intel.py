@@ -1,14 +1,19 @@
 from __future__ import annotations
-import json, re
+
+import json
+import re
+from typing import Any
+
 try:
-    from llm_client import call_llm
-except Exception:
-    call_llm = None
-from pathlib import Path
+    from llm_client import call_llm_json
+except Exception:  # pragma: no cover - package import path fallback.
+    from .llm_client import call_llm_json
 
 PROMPT = """You are helping identify likely opponent assets for a public, unclassified training wargame.
 Do not call this OSINT. Call it Opponent Asset Identification.
 Use plain English. Avoid jargon. Give concise, useful results.
+Every output must be specific to the scenario and Blue selected assets. Do not use canned examples.
+Every string field must be non-empty.
 
 Scenario: {scenario}
 Adversary: {adversary}
@@ -29,20 +34,103 @@ Return JSON only:
 }}
 """
 
-def fallback(scenario: str, adversary: str):
-    s=(scenario or '').lower()
-    if 'embassy' in s:
-        return {"classification":"PUBLIC-SOURCE ESTIMATE","scenario":scenario,"adversary":adversary,"threat_level":"HIGH","confidence":72,"summary":"The likely opponent package is small but dangerous: mobile air threats, roadblocks, and rumor campaigns that slow civilian movement.","predicted_assets":[{"name":"Mobile air-defense teams","category":"air defense","quantity":"small teams near routes","confidence":76,"threat_to_blue":"HIGH","capability":"Can make air evacuation unsafe.","counter":"Use alternate pickup sites and suppress threats before flights."},{"name":"Roadblocks and militia patrols","category":"ground","quantity":"several checkpoints","confidence":82,"threat_to_blue":"MEDIUM","capability":"Can delay civilians reaching the embassy.","counter":"Use protected convoys and multiple muster points."},{"name":"Rumor/disinformation channels","category":"information","quantity":"local media and social channels","confidence":68,"threat_to_blue":"MEDIUM","capability":"Can cause crowds to move to the wrong place.","counter":"Use trusted public messaging."}],"key_warnings":["Air access may close suddenly.","Civilians may not reach muster points on time.","Rumors can break the plan before combat does."],"recommended_blue_additions":["Alternate pickup site","Route clearing team","Public communications cell"],"historical_precedent":"Comparable evacuation missions often struggle when air access, route control, or civilian accountability breaks before extraction begins."}
-    if 'nato' in s:
-        return {"classification":"PUBLIC-SOURCE ESTIMATE","scenario":scenario,"adversary":adversary,"threat_level":"HIGH","confidence":74,"summary":"The opponent is likely to use ambiguity first: cyber pressure, border incidents, and long-range fires designed to slow allied decisions.","predicted_assets":[{"name":"Long-range fires","category":"missile/artillery","quantity":"regional network","confidence":74,"threat_to_blue":"HIGH","capability":"Can threaten staging areas.","counter":"Disperse and use alternate logistics routes."},{"name":"Cyber disruption teams","category":"cyber","quantity":"state-backed groups","confidence":80,"threat_to_blue":"HIGH","capability":"Can delay mobilization.","counter":"Backup communications and manual procedures."},{"name":"Deniable border forces","category":"ground","quantity":"small units/proxies","confidence":69,"threat_to_blue":"MEDIUM","capability":"Can create confusion below the war threshold.","counter":"Define response triggers early."}],"key_warnings":["Alliance decision speed is a target.","Cyber effects may arrive first.","Ambiguity can delay response."],"recommended_blue_additions":["Redundant communications","Public attribution plan","Pre-approved reinforcement triggers"],"historical_precedent":"Gray-zone crises often exploit hesitation before open combat; slow political response can be as costly as weak military response."}
-    return {"classification":"PUBLIC-SOURCE ESTIMATE","scenario":scenario,"adversary":adversary,"threat_level":"CRITICAL","confidence":78,"summary":"The likely opponent package combines missiles, submarines, air defense, cyber disruption, and public pressure.","predicted_assets":[{"name":"Anti-ship missiles","category":"missile","quantity":"multiple mobile units","confidence":85,"threat_to_blue":"CRITICAL","capability":"Forces ships to stay farther away.","counter":"Disperse, use deception, and strike only with reliable intelligence."},{"name":"Diesel-electric submarines","category":"naval","quantity":"several patrol groups","confidence":79,"threat_to_blue":"HIGH","capability":"Threatens sea lanes and supply routes.","counter":"Use ASW patrols and alternate routes."},{"name":"Integrated air defense","category":"air defense","quantity":"coastal network","confidence":83,"threat_to_blue":"HIGH","capability":"Makes air control slower and costlier.","counter":"Use electronic warfare and avoid assuming rapid air control."}],"key_warnings":["Political windows may close quickly.","Mobile targets are hard to confirm.","Allied basing access is fragile."],"recommended_blue_additions":["ASW patrol aircraft","Electronic warfare support","Allied messaging plan"],"historical_precedent":"Past crises show political windows can close faster than operational plans expect, and mobile target hunts are often harder than planners hope."}
+def _parse_json(raw: str) -> dict[str, Any]:
+    text = re.sub(r"^```json\s*|^```\s*|\s*```$", "", raw.strip()).strip()
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError:
+        match = re.search(r"\{.*\}", text, re.S)
+        if not match:
+            raise
+        data = json.loads(match.group())
+    if not isinstance(data, dict):
+        raise ValueError("Intel response was not a JSON object.")
+    return data
+
+
+def _text(value: Any) -> str:
+    return str(value or "").strip()
+
+
+def _number(value: Any, field: str) -> int:
+    try:
+        number = int(round(float(value)))
+    except Exception as exc:
+        raise ValueError(f"Intel response missing numeric {field}.") from exc
+    return max(0, min(100, number))
+
+
+def _text_list(value: Any, field: str) -> list[str]:
+    if not isinstance(value, list):
+        raise ValueError(f"Intel response missing {field}.")
+    rows = [_text(item) for item in value]
+    rows = [item for item in rows if item]
+    if not rows:
+        raise ValueError(f"Intel response returned an empty {field}.")
+    return rows
+
+
+def _normalize_asset(item: Any, index: int) -> dict[str, Any]:
+    if not isinstance(item, dict):
+        raise ValueError(f"Intel response asset {index + 1} was not an object.")
+    asset = {
+        "name": _text(item.get("name")),
+        "category": _text(item.get("category")),
+        "quantity": _text(item.get("quantity")),
+        "confidence": _number(item.get("confidence"), f"predicted_assets[{index}].confidence"),
+        "threat_to_blue": _text(item.get("threat_to_blue")),
+        "capability": _text(item.get("capability")),
+        "counter": _text(item.get("counter")),
+    }
+    missing = [key for key, value in asset.items() if key != "confidence" and not value]
+    if missing:
+        raise ValueError(f"Intel response asset {index + 1} missing {', '.join(missing)}.")
+    return asset
+
+
+def _normalize_briefing(data: dict[str, Any], scenario: str, adversary: str) -> dict[str, Any]:
+    predicted_assets = data.get("predicted_assets")
+    if not isinstance(predicted_assets, list) or not predicted_assets:
+        raise ValueError("Intel response did not include predicted_assets.")
+
+    briefing = {
+        "classification": _text(data.get("classification")) or "PUBLIC-SOURCE ESTIMATE",
+        "scenario": _text(data.get("scenario")) or scenario,
+        "adversary": _text(data.get("adversary")) or adversary,
+        "threat_level": _text(data.get("threat_level")),
+        "confidence": _number(data.get("confidence"), "confidence"),
+        "summary": _text(data.get("summary")),
+        "predicted_assets": [_normalize_asset(item, index) for index, item in enumerate(predicted_assets)],
+        "key_warnings": _text_list(data.get("key_warnings"), "key_warnings"),
+        "recommended_blue_additions": _text_list(data.get("recommended_blue_additions"), "recommended_blue_additions"),
+        "historical_precedent": _text(data.get("historical_precedent")),
+    }
+    missing = [key for key in ["threat_level", "summary", "historical_precedent"] if not briefing[key]]
+    if missing:
+        raise ValueError(f"Intel response missing {', '.join(missing)}.")
+    return briefing
 
 def generate_intel_briefing(scenario: str, adversary: str, blue_assets: list) -> dict:
-    if call_llm:
-        try:
-            raw=call_llm(PROMPT.format(scenario=scenario,adversary=adversary,blue_assets=json.dumps(blue_assets)),max_tokens=1400,temperature=0.25)
-            raw=re.sub(r'^```json\s*|^```\s*|\s*```$','',raw.strip())
-            return json.loads(re.search(r'\{.*\}', raw, re.S).group())
-        except Exception:
-            pass
-    return fallback(scenario, adversary)
+    prompt = PROMPT.format(
+        scenario=scenario,
+        adversary=adversary,
+        blue_assets=json.dumps(blue_assets),
+    )
+    raw = call_llm_json(
+        prompt,
+        max_tokens=2400,
+        temperature=0.25,
+    )
+    try:
+        return _normalize_briefing(_parse_json(raw), scenario, adversary)
+    except Exception as first_error:
+        repair_prompt = f"""{prompt}
+
+The previous model output was invalid or incomplete.
+Error: {type(first_error).__name__}: {first_error}
+Previous output:
+{raw[:4000]}
+
+Return one complete JSON object that satisfies the schema. Do not omit any field."""
+        repaired = call_llm_json(repair_prompt, max_tokens=2400, temperature=0)
+        return _normalize_briefing(_parse_json(repaired), scenario, adversary)

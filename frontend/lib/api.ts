@@ -49,9 +49,12 @@ export type AutopsyReport = {
   assumptions_broken: number;
   assumptions_stressed: number;
   final_metrics: Record<string, number>;
+  assumptions?: Assumption[];
+  events?: GameEvent[];
   root_causes: string[];
   recommendation: string;
   report: string;
+  lessons?: string[];
 };
 
 export const API_BASE = (
@@ -78,11 +81,14 @@ async function safeJson(res: Response) {
   return res.json();
 }
 
-export async function createGame(plan: string) {
+export async function createGame(plan: string, maxTurns?: number) {
   const res = await fetch(`${API_BASE}/games`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ plan }),
+    body: JSON.stringify({
+      plan,
+      ...(maxTurns ? { max_turns: maxTurns } : {}),
+    }),
   });
   return safeJson(res);
 }

@@ -1,7 +1,13 @@
 from __future__ import annotations
 import json, re
-from game_state import GameState
-from llm_client import call_llm_json
+try:
+    from game_state import GameState
+except Exception:  # pragma: no cover - package import path fallback.
+    from .game_state import GameState
+try:
+    from llm_client import call_llm_json
+except Exception:  # pragma: no cover - package import path fallback.
+    from .llm_client import call_llm_json
 
 PROMPT = """You are the Ghost Council — a PLA Senior Theater Commander in a wargame.
 
