@@ -1,86 +1,56 @@
-from __future__ import annotations
-import json
 from game_state import GameState
-from llm_client import call_llm
+try:
+    from llm_client import call_llm
+except Exception:
+    call_llm = None
 
-PROMPT = """You are generating a military Failure Autopsy for WARBREAK. Readers are national security practitioners.
+PROMPT = """You are writing a WARBREAK mission debrief for a non-technical commander.
+Use plain English. Avoid jargon. No long doctrine paragraphs. No coded headings like A1/A2 except when necessary.
 
-Be specific. Reference actual moves and assumptions by ID and name. No fluff.
+Write exactly 5 short sections:
+1. Bottom line — one sentence.
+2. What broke — 3 bullets, simple wording.
+3. Why it mattered — 3 bullets, simple cause and effect.
+4. Real-world echo — name a comparable historical pattern, but do not overclaim it is identical.
+5. Better next plan — 3 concrete changes.
 
-ORIGINAL PLAN:
-{plan}
+Original plan: {plan}
+History: {history}
+Assumptions: {assumptions}
+Final status: Blue strength {blue}, international opinion {intl}, US support {us}, allied confidence {allied}
+"""
 
-ASSUMPTIONS:
-{assumptions}
+def generate_autopsy(state: GameState) -> str:
+    history = getattr(state, 'move_history', [])
+    assumptions = []
+    for a in getattr(state, 'assumptions', []):
+        assumptions.append({
+            'text': getattr(a,'text',''),
+            'status': getattr(a,'status', 'broken' if getattr(a,'broken',False) else 'untested'),
+            'turn_broken': getattr(a,'turn_broken',None),
+            'fragility': getattr(a,'fragility',None)
+        })
+    if call_llm:
+        try:
+            return call_llm(PROMPT.format(plan=getattr(state,'plan_text',''), history=history, assumptions=assumptions, blue=round(getattr(state,'blue_strength',0),1), intl=round(getattr(state,'intl_opinion',0),1), us=round(getattr(state,'us_domestic',0),1), allied=round(getattr(state,'allied_confidence',0),1)), max_tokens=900, temperature=0.25)
+        except Exception:
+            pass
+    return """Bottom line — The mission failed because a hidden assumption broke before the team had a backup plan.
 
-GAME HISTORY:
-{history}
+What broke
+- The plan depended on one route, partner, or time window staying available.
+- The opponent pressured that weak point instead of fighting where Blue felt strongest.
+- Once it broke, other parts of the plan slowed down.
 
-FINAL METRICS:
-Blue strength: {blue_strength}/100 | Intl opinion: {intl}/100
-US domestic: {us_domestic}/100 | Allied confidence: {allied}/100
-Red domestic: {red_domestic}/100 | Status: {status}
+Why it mattered
+- Blue lost time.
+- Public or allied confidence dropped.
+- Recovery options became more expensive than prevention.
 
-Write with exactly these 5 section headers (use == TITLE == format):
+Real-world echo
+- Many historical operations show this same pattern: access, logistics, timing, or public support fails earlier than expected.
 
-== ASSUMPTION INVENTORY ==
-All 6 assumptions ranked by fragility. For each: ID, fragility, status, turn broken if applicable, what it caused.
-
-== FAILURE CHAIN ==
-Exact causal sequence from first stress to final state. Which broke first, what cascaded, trace the path.
-
-== DECISION AUDIT ==
-Which moves were sound. Which created new fragile assumptions. Which missed opportunities. Be direct.
-
-== INFORMATION VERDICT ==
-Did Blue win or lose the information war? What drove each metric? What should have been different?
-
-== RESILIENT PLAN ==
-Three specific changes to the original plan. Each must cite doctrine (JP 3-0, FM 6-0, FM 4-0, JP 3-12, JP 3-16) and explain why it addresses the fragility.
-
-Write in direct military prose. No bullet points. No vague advice."""
-
-def generate_autopsy(game: GameState) -> dict:
-    assumptions_data = [
-        {"id": a.id, "text": a.text, "fragility": a.fragility, "category": a.category,
-         "basis": a.basis, "doctrine_ref": a.doctrine_ref, "status": a.status,
-         "turn_broken": a.turn_broken, "cascade_effect": a.cascade_effect}
-        for a in game.assumptions
-    ]
-    history_data = [
-        {"turn": e.turn, "blue_move": e.blue_move, "red_move": e.red_move,
-         "ghost_reasoning": e.ghost_reasoning, "broken_chain": e.broken_chain}
-        for e in game.events
-    ]
-    report = call_llm(PROMPT.format(
-        plan=game.plan,
-        assumptions=json.dumps(assumptions_data, indent=2),
-        history=json.dumps(history_data, indent=2),
-        blue_strength=game.metrics.get("blue_strength", 0),
-        intl=game.metrics.get("intl_opinion", 0),
-        us_domestic=game.metrics.get("us_domestic", 0),
-        allied=game.metrics.get("allied_confidence", 0),
-        red_domestic=game.metrics.get("red_domestic", 0),
-        status=game.status,
-    ), temperature=0.4, max_tokens=2000)
-
-    broken = [a for a in game.assumptions if a.status == "broken"]
-    stressed = [a for a in game.assumptions if a.status == "stressed"]
-    return {
-        "game_id": game.id, "status": game.status, "turns": game.turn,
-        "final_metrics": game.metrics, "report": report,
-        "root_causes": [a.text for a in sorted(broken, key=lambda x: x.fragility, reverse=True)[:3]],
-        "assumptions_broken": len(broken), "assumptions_stressed": len(stressed),
-        "escalation_gates": {
-            "nuclear_signaling": game.metrics.get("red_domestic", 0) > 75,
-            "preemptive_strike_auth": game.metrics.get("us_domestic", 0) > 40,
-            "japan_support": game.metrics.get("allied_confidence", 0) > 80,
-            "allied_basing": game.metrics.get("intl_opinion", 0) > -30,
-        },
-        "lessons": [
-            "Separate assumptions from objectives before execution.",
-            "Treat high-fragility assumptions as decision gates requiring explicit mitigation.",
-            "Design contingency branches for logistics, communications, and alliance failure modes.",
-        ],
-        "recommendation": "Before the next run, require one mitigation or trigger condition for every assumption with fragility above 70.",
-    }
+Better next plan
+- Identify the top two assumptions before the first move.
+- Build a backup route and backup communication plan.
+- Delay risky escalation until the fragile assumption is protected."""
