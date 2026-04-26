@@ -7,6 +7,15 @@ import { createGame, playTurn } from "../../lib/api";
 
 type Action = { key:string; title:string; desc:string; icon:string; asset?:string; once?:boolean; kind:string };
 type LatLng = [number, number];
+type OpponentAsset = {
+  name?: string;
+  category?: string;
+  quantity?: string;
+  confidence?: number;
+  threat_to_blue?: string;
+  capability?: string;
+  counter?: string;
+};
 
 const assetActions: Record<string, Action> = {
   carrier:  { key:"carrier_strike",    title:"Carrier Strike Group",      desc:"Launch long-range air package.",         icon:"⚓",  asset:"carrier",  kind:"strike",  once:true },
@@ -69,6 +78,140 @@ const assetPositions: Record<string, Record<string, LatLng>> = {
   },
 };
 
+const fallbackOpponentPackages: Record<string, OpponentAsset[]> = {
+  "Taiwan Strait 2027": [
+    { name:"Anti-ship missiles", category:"missile", confidence:85, threat_to_blue:"CRITICAL" },
+    { name:"Diesel-electric submarines", category:"naval", confidence:79, threat_to_blue:"HIGH" },
+    { name:"Integrated air defense", category:"air defense", confidence:83, threat_to_blue:"HIGH" },
+  ],
+  "NATO Eastern Flank": [
+    { name:"Long-range fires", category:"missile/artillery", confidence:74, threat_to_blue:"HIGH" },
+    { name:"Cyber disruption teams", category:"cyber", confidence:80, threat_to_blue:"HIGH" },
+    { name:"Deniable border forces", category:"ground", confidence:69, threat_to_blue:"MEDIUM" },
+  ],
+  "Embassy Evacuation": [
+    { name:"Mobile air-defense teams", category:"air defense", confidence:76, threat_to_blue:"HIGH" },
+    { name:"Roadblocks and militia patrols", category:"ground", confidence:82, threat_to_blue:"MEDIUM" },
+    { name:"Rumor/disinformation channels", category:"information", confidence:68, threat_to_blue:"MEDIUM" },
+  ],
+  "Cyber Infrastructure": [
+    { name:"Cyber intrusion cells", category:"cyber", confidence:82, threat_to_blue:"HIGH" },
+    { name:"Substation disruption teams", category:"infrastructure", confidence:74, threat_to_blue:"HIGH" },
+    { name:"Disinformation channels", category:"information", confidence:70, threat_to_blue:"MEDIUM" },
+  ],
+};
+
+const opponentPositions: Record<string, Record<string, LatLng[]>> = {
+  "Taiwan Strait 2027": {
+    missile:[[24.449,118.075],[25.507,119.499]],
+    submarine:[[23.566,119.593],[22.629,120.081]],
+    airDefense:[[25.986,119.435],[24.515,118.147]],
+    cyber:[[24.479,118.089]],
+    information:[[24.479,118.089]],
+    ground:[[24.621,118.247]],
+    default:[[24.449,118.075],[23.566,119.593],[25.986,119.435]],
+  },
+  "NATO Eastern Flank": {
+    missile:[[54.710,20.452],[53.900,27.559]],
+    airDefense:[[54.710,20.452]],
+    cyber:[[53.900,27.559]],
+    ground:[[53.669,23.814],[54.311,22.303]],
+    information:[[53.900,27.559]],
+    default:[[54.710,20.452],[53.900,27.559],[53.669,23.814]],
+  },
+  "Embassy Evacuation": {
+    airDefense:[[33.263,44.235]],
+    ground:[[33.315,44.357]],
+    information:[[33.341,44.394]],
+    cyber:[[33.341,44.394]],
+    missile:[[33.283,44.491]],
+    default:[[33.263,44.235],[33.315,44.357],[33.341,44.394]],
+  },
+  "Cyber Infrastructure": {
+    cyber:[[40.713,-74.006],[40.736,-74.172]],
+    infrastructure:[[40.858,-74.164],[40.735,-74.172]],
+    information:[[40.758,-73.986]],
+    ground:[[40.678,-74.045]],
+    default:[[40.713,-74.006],[40.858,-74.164],[40.758,-73.986]],
+  },
+};
+
+function escapeHtml(value: string) {
+  return value.replace(/[&<>"']/g, (char) => ({
+    "&":"&amp;", "<":"&lt;", ">":"&gt;", "\"":"&quot;", "'":"&#39;",
+  }[char] || char));
+}
+
+function fallbackOpponentAssets(scenario: string): OpponentAsset[] {
+  return fallbackOpponentPackages[scenario] || fallbackOpponentPackages["Taiwan Strait 2027"];
+}
+
+function parseOpponentAssets(raw: string | null, scenario: string): OpponentAsset[] {
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed)) return parsed.filter(asset => asset && typeof asset === "object");
+    if (parsed?.scenario && parsed.scenario !== scenario) return [];
+    const assets = parsed?.predicted_assets;
+    return Array.isArray(assets) ? assets.filter(asset => asset && typeof asset === "object") : [];
+  } catch {
+    return [];
+  }
+}
+
+function opponentName(asset?: OpponentAsset) {
+  return asset?.name || "Likely opponent asset";
+}
+
+function opponentRole(asset?: OpponentAsset) {
+  const text = `${asset?.name || ""} ${asset?.category || ""}`.toLowerCase();
+  if (text.includes("submarine") || text.includes("naval") || text.includes("sea")) return "submarine";
+  if (text.includes("air defense") || text.includes("air-defense") || text.includes("s-300") || text.includes("iad")) return "airDefense";
+  if (text.includes("missile") || text.includes("fires") || text.includes("artillery") || text.includes("rocket")) return "missile";
+  if (text.includes("cyber") || text.includes("electronic")) return "cyber";
+  if (text.includes("information") || text.includes("rumor") || text.includes("disinformation") || text.includes("media")) return "information";
+  if (text.includes("infrastructure") || text.includes("substation") || text.includes("grid")) return "infrastructure";
+  if (text.includes("ground") || text.includes("roadblock") || text.includes("militia") || text.includes("border") || text.includes("forces")) return "ground";
+  return "default";
+}
+
+function opponentIcon(asset?: OpponentAsset) {
+  const role = opponentRole(asset);
+  if (role === "missile") return "🚀";
+  if (role === "submarine") return "◆";
+  if (role === "airDefense") return "▲";
+  if (role === "cyber") return "⚡";
+  if (role === "information") return "◈";
+  if (role === "infrastructure") return "▣";
+  if (role === "ground") return "▰";
+  return "◆";
+}
+
+function opponentPoint(scenario: string, asset: OpponentAsset | undefined, index: number): LatLng {
+  const role = opponentRole(asset);
+  const scenarioPositions = opponentPositions[scenario] || opponentPositions["Taiwan Strait 2027"];
+  const points = scenarioPositions[role] || scenarioPositions.default;
+  if (points?.length) return points[index % points.length];
+
+  const cfg = mapCfg[scenario] || mapCfg["Taiwan Strait 2027"];
+  const base = cfg.red?.[index % Math.max(1, cfg.red.length)] || cfg.center;
+  return [base[0], base[1]];
+}
+
+function matchOpponentAssetIndex(assets: OpponentAsset[], action: Action) {
+  if (!assets.length) return -1;
+  const preferredRoles =
+    action.kind === "sub" || action.asset === "p8" ? ["submarine"] :
+    action.kind === "cyber" ? ["cyber", "information", "infrastructure"] :
+    action.kind === "defense" ? ["missile", "airDefense"] :
+    action.kind === "ground" ? ["ground", "information"] :
+    action.kind === "sensor" ? ["submarine", "missile", "ground"] :
+    ["airDefense", "missile", "ground"];
+
+  const index = assets.findIndex(asset => preferredRoles.includes(opponentRole(asset)));
+  return index >= 0 ? index : 0;
+}
+
 function localGhostCouncil(act: Action, redAsset: string, scenario: string) {
   const pressure: Record<string, string> = {
     strike: "Red disperses the visible target set and turns your kinetic move into a contest over proof, timing, and escalation control.",
@@ -106,7 +249,10 @@ function assetPoint(scenario: string, action: Action, index: number): LatLng {
   ];
 }
 
-function redTargetPoint(scenario: string, action: Action): LatLng {
+function redTargetPoint(scenario: string, action: Action, opponentAssets: OpponentAsset[]): LatLng {
+  const opponentIndex = matchOpponentAssetIndex(opponentAssets, action);
+  if (opponentIndex >= 0) return opponentPoint(scenario, opponentAssets[opponentIndex], opponentIndex);
+
   const cfg = mapCfg[scenario] || mapCfg["Taiwan Strait 2027"];
   const red = cfg.red || [];
   const maritimeAssets = new Set(["sub", "p8"]);
@@ -154,6 +300,7 @@ export default function GamePage() {
   const [redUsed,   setRedUsed]   = useState<string[]>([]);
   const [history,   setHistory]   = useState<any[]>([]);
   const [assetIds,  setAssetIds]  = useState<string[]>([]);
+  const [opponentAssets, setOpponentAssets] = useState<OpponentAsset[]>([]);
   const [mapReady,  setMapReady]  = useState(false);
   const [busy,      setBusy]      = useState(false);
 
@@ -184,8 +331,10 @@ export default function GamePage() {
     }
 
     const mt  = Number(localStorage.getItem("warbreak_max_turns") || ids.length || 5);
+    const storedOpponentAssets = parseOpponentAssets(localStorage.getItem("warbreak_opponent_assets"), sc);
     setScenario(sc);
     setAssetIds(ids);
+    setOpponentAssets(storedOpponentAssets.length ? storedOpponentAssets : fallbackOpponentAssets(sc));
     setMaxTurns(Math.max(1, mt));
     setSelected(assetActions[ids[0]]?.key || "");
   }, [router]);
@@ -231,8 +380,20 @@ export default function GamePage() {
       iconAnchor:[20,20],
     });
 
-    cfg.red.forEach((p: any) => {
-      L.marker([p[0],p[1]], { icon:icon("red", p[2]), zIndexOffset:200 }).addTo(redLayer.current);
+    opponentAssets.forEach((asset, index) => {
+      const point = opponentPoint(scenario, asset, index);
+      const name = `${index + 1}. ${opponentName(asset)}`;
+      const marker = L.marker(point, {
+        icon:icon(`red opponent role-${opponentRole(asset)}`, opponentIcon(asset), index + 1),
+        zIndexOffset:300,
+      }).addTo(redLayer.current);
+      marker.bindTooltip(escapeHtml(name), {
+        permanent:true,
+        direction:"right",
+        offset:[18,0],
+        opacity:0.94,
+        className:"red-marker-label",
+      });
     });
 
     actions.forEach((action, index) => {
@@ -247,12 +408,12 @@ export default function GamePage() {
 
     if (actions.length) {
       const points = actions.map((action, index) => assetPoint(scenario, action, index));
-      const redPoints = (cfg.red || []).map((p: any) => [p[0], p[1]]);
+      const redPoints = opponentAssets.map((asset, index) => opponentPoint(scenario, asset, index));
       try {
         map.fitBounds(L.latLngBounds([...points, ...redPoints]).pad(0.22), { animate:false, maxZoom:cfg.zoom + 1 });
       } catch {}
     }
-  }, [mapReady, scenario, actions, selected]);
+  }, [mapReady, scenario, actions, selected, opponentAssets]);
 
   // ── Sound ─────────────────────────────────────────────────────────────────
   const sound = (type: string) => {
@@ -275,7 +436,7 @@ export default function GamePage() {
 
     const index = Math.max(0, actions.findIndex(item => item.key === action.key));
     const from = assetPoint(scenario, action, index);
-    const to = redTargetPoint(scenario, action);
+    const to = redTargetPoint(scenario, action, opponentAssets);
     const layers: any[] = [];
     const add = (layer: any) => {
       layer.addTo(fxLayer.current || map);
@@ -339,11 +500,8 @@ export default function GamePage() {
     animate(act);
     setBusy(true);
 
-    const redAsset = act.kind==="strike"          ? "mobile air defense + information response"
-                   : act.kind==="sub"             ? "diesel-electric submarine screen"
-                   : act.kind==="cyber"           ? "cyber / electronic disruption cell"
-                   : act.kind==="defense"         ? "missile pressure and decoys"
-                                                  : "media pressure + observation network";
+    const targetOpponent = opponentAssets[matchOpponentAssetIndex(opponentAssets, act)];
+    const redAsset = opponentName(targetOpponent);
     setRedUsed(r => Array.from(new Set([...r, redAsset])));
 
     let ghostReply = "";
@@ -513,13 +671,24 @@ export default function GamePage() {
             )}
           </div>
 
-          {/* Red assets */}
+          {/* Opponent package */}
           <div className="side-card">
-            <h3 style={{ fontSize:13, marginTop:0, marginBottom:8 }}>Red assets committed</h3>
-            {redUsed.length
-              ? redUsed.map((r, i) => <p key={i} className="small" style={{ fontSize:11 }}>• {r}</p>)
-              : <p className="small" style={{ fontSize:11, opacity:0.4 }}>No enemy asset committed yet.</p>
-            }
+            <h3 style={{ fontSize:13, marginTop:0, marginBottom:8 }}>Likely opponent package</h3>
+            <div className="opponent-list">
+              {opponentAssets.map((asset, i) => {
+                const name = opponentName(asset);
+                const engaged = redUsed.includes(name);
+                return (
+                  <p key={`${name}-${i}`} className={`opponent-row ${engaged ? "engaged" : ""}`}>
+                    <span>{opponentIcon(asset)} {name}</span>
+                    <b>{engaged ? "ENGAGED" : `${asset.confidence || "—"}%`}</b>
+                  </p>
+                );
+              })}
+              {!opponentAssets.length && (
+                <p className="small" style={{ fontSize:11, opacity:0.4 }}>No likely opponent package loaded.</p>
+              )}
+            </div>
           </div>
 
           {/* Mission log */}
@@ -528,7 +697,7 @@ export default function GamePage() {
             {history.length === 0 && <p className="small" style={{ fontSize:11, opacity:0.4 }}>No moves yet.</p>}
             {history.map(h => (
               <p key={h.turn} className="small" style={{ fontSize:10, margin:"0 0 4px" }}>
-                T{h.turn}: Blue → {h.action}. Red → {h.red}.
+                T{h.turn}: Blue → {h.action}. Opponent → {h.red}.
               </p>
             ))}
           </div>

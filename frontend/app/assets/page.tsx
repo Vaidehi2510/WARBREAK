@@ -57,6 +57,7 @@ export default function AssetsPage() {
       const res = await identifyOpponentAssets(scenario, picked);
       if (res) {
         setBrief(res);
+        localStorage.setItem("warbreak_opponent_assets", JSON.stringify(res));
       } else {
         setIntelErr("No response from intel API. Check backend is running.");
       }
