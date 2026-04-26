@@ -1,16 +1,13 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "experimentalServices": {
-    "frontend": {
-      "entrypoint": "frontend",
-      "routePrefix": "/",
-      "framework": "nextjs"
-    },
-    "backend": {
-      "entrypoint": "api/index.py",
-      "routePrefix": "/api",
-      "framework": "fastapi",
-      "includeFiles": "backend/**",
+  "framework": "fastapi",
+  "buildCommand": "cd frontend && npm ci && npm run build",
+  "functions": {
+    "main.py": {
+      "includeFiles": [
+        "backend/**",
+        "frontend/out/**"
+      ],
       "maxDuration": 60
     }
   }

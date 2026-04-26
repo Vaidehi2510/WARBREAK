@@ -36,8 +36,10 @@ Open http://127.0.0.1:3010
 ## Deploy on Vercel
 
 This repo is configured for a single Vercel project that serves both:
-- Frontend from `frontend/`
-- Backend API from `backend/` through root routing
+- Exported frontend pages from `frontend/`
+- Backend API from `backend/` under `/api`
+
+The deployment uses the stable FastAPI preset. `main.py` mounts the backend at `/api` and serves the static frontend export, so Vercel Services beta access is not required.
 
 See [DEPLOY_VERCEL.md](DEPLOY_VERCEL.md) for the exact setup steps and required environment variables.
 
