@@ -30,6 +30,22 @@ def _shifts(action: str) -> dict[str, int]:
             return ACTION_SHIFTS[key]
     return ACTION_SHIFTS["default"]
 
+def preview_adjudication(player_action: str, turn: int = 1) -> Event:
+    shifts = dict(_shifts(player_action))
+    return Event(
+        turn=turn,
+        title=f"Turn {turn} BDA preview",
+        description="Fast deterministic battle-damage preview from the adjudication metric model.",
+        blue_move=player_action,
+        red_move="Full Ghost Council response still processing.",
+        ghost_reasoning="Preliminary BDA only; final adjudication may refine the opponent response and assumption chain.",
+        ghost_state_text="Preview mode.",
+        targeted_assumption_id="",
+        broken_chain=[],
+        metric_deltas=shifts,
+        options=[],
+    )
+
 def adjudicate(game: GameState, player_action: str) -> Event:
     shifts = dict(_shifts(player_action))
     ghost = ghost_response(game, player_action)

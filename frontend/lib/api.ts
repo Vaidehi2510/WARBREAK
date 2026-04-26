@@ -102,6 +102,20 @@ export async function playTurn(gameId: string, action: string) {
   return safeJson(res);
 }
 
+export async function previewTurnBda(action: string, metrics: Record<string, number>, turn: number, maxTurns: number) {
+  const res = await fetch(`${API_BASE}/turn/preview`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      player_action: action,
+      metrics,
+      turn,
+      max_turns: maxTurns,
+    }),
+  });
+  return safeJson(res);
+}
+
 export async function getGame(gameId: string) {
   const res = await fetch(`${API_BASE}/games/${gameId}`);
   return safeJson(res);

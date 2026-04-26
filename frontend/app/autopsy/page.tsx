@@ -657,6 +657,54 @@ function deriveWhatIf(view: AutopsyView) {
   return { actual, branches: branches.slice(0, 4), outcome };
 }
 
+function deriveMissionOutcome(view: AutopsyView) {
+  const bluePressure = Math.min(
+    view.final_metrics.intl_opinion ?? 50,
+    view.final_metrics.us_domestic ?? 72,
+    view.final_metrics.allied_confidence ?? 58,
+    view.final_metrics.blue_strength ?? 100,
+  );
+  const latestDamage = view.damageReports[0];
+
+  if (view.status === "failed" || bluePressure <= 15) {
+    return {
+      icon: "▼",
+      label: "PLAN COLLAPSED",
+      color: "#ff3c3c",
+      glow: "rgba(255,60,60,0.3)",
+      note: "Critical mission threshold breached.",
+    };
+  }
+
+  if (view.assumptions_broken > 0 || bluePressure < 35) {
+    return {
+      icon: "!",
+      label: "MISSION COMPROMISED",
+      color: "#ff6644",
+      glow: "rgba(255,102,68,0.28)",
+      note: "Completed on paper, but a core assumption broke.",
+    };
+  }
+
+  if (view.assumptions_stressed >= 3 || bluePressure < 55 || (latestDamage && latestDamage.damage < 20)) {
+    return {
+      icon: "◆",
+      label: "MISSION DEGRADED",
+      color: "#ffaa00",
+      glow: "rgba(255,170,0,0.26)",
+      note: "Objective reached with unresolved pressure.",
+    };
+  }
+
+  return {
+    icon: "▲",
+    label: "MISSION COMPLETE",
+    color: "#00e87a",
+    glow: "rgba(0,232,122,0.3)",
+    note: "No major collapse signal recorded.",
+  };
+}
+
 function parseSections(reportText: string) {
   const sections: Record<string, string> = {};
   const parts = reportText.split(/^== (.+?) ==$/m).filter(Boolean);
@@ -991,7 +1039,8 @@ export default function AutopsyPage() {
 
   if (!report) return null;
 
-  const failed = report.status === "failed";
+  const outcome = deriveMissionOutcome(report);
+  const failed = outcome.label !== "MISSION COMPLETE";
   const tabContent = [
     <div key="assumptions">
       {report.usingMissionSignals && (
@@ -1139,11 +1188,11 @@ export default function AutopsyPage() {
       <div style={{ flex: 1, padding: "28px 36px", maxWidth: 1060, margin: "0 auto", width: "100%", boxSizing: "border-box" }}>
         <div style={{ textAlign: "center", marginBottom: 32 }}>
           <div className="kicker" style={{ marginBottom: 10, fontSize: 10 }}>FAILURE AUTOPSY - {report.scenario.toUpperCase()}</div>
-          <h1 style={{ fontSize: "clamp(36px,5.5vw,64px)", margin: "0 0 8px", color: failed ? "#ff3c3c" : "#00e87a", textShadow: `0 0 40px ${failed ? "rgba(255,60,60,0.3)" : "rgba(0,232,122,0.3)"}` }}>
-            {failed ? "▼ PLAN COLLAPSED" : "▲ MISSION COMPLETE"}
+          <h1 style={{ fontSize: "clamp(36px,5.5vw,64px)", margin: "0 0 8px", color: outcome.color, textShadow: `0 0 40px ${outcome.glow}` }}>
+            {outcome.icon} {outcome.label}
           </h1>
           <div style={{ fontSize: 13, opacity: 0.48 }}>
-            {report.turns} turn{report.turns === 1 ? "" : "s"} · {report.assumptions_broken} broken signal{report.assumptions_broken === 1 ? "" : "s"} · {report.assumptions_stressed} stressed
+            {report.turns} turn{report.turns === 1 ? "" : "s"} · {report.assumptions_broken} broken signal{report.assumptions_broken === 1 ? "" : "s"} · {report.assumptions_stressed} stressed · {outcome.note}
           </div>
           {report.warning && <div style={{ marginTop: 10, fontSize: 11, color: "#ffaa00", opacity: 0.72 }}>Backend autopsy unavailable; rebuilt from saved mission data: {report.warning}</div>}
         </div>

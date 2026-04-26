@@ -3,7 +3,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { Map as LeafletMap } from "leaflet";
 import "leaflet/dist/leaflet.css";
-import { createGame, playTurn } from "../../lib/api";
+import { createGame, playTurn, previewTurnBda } from "../../lib/api";
 
 type Action = { key:string; title:string; desc:string; icon:string; asset?:string; once?:boolean; kind:string };
 type LatLng = [number, number];
@@ -35,6 +35,7 @@ type DamageReport = {
   blueCost: number;
   metricDeltas: Record<string, number>;
   evidence: string[];
+  provisional?: boolean;
 };
 
 const assetActions: Record<string, Action> = {
@@ -274,14 +275,15 @@ function buildDamageReport(
     damage >= 15 ? "MEDIUM" :
     "LOW";
   const redMove = String(event?.red_move || "").trim();
-  const ghostReasoning = String(event?.ghost_reasoning || "").trim();
   const capability = String(target?.capability || "").trim();
   const counter = String(target?.counter || "").trim();
+  const isPreview = Boolean(event?.preview);
   const evidence = [
     `Red force ${formatDelta(currentRed - previousRed)} (${previousRed} -> ${currentRed})`,
     `Blue force ${formatDelta(currentBlue - previousBlue)} (${previousBlue} -> ${currentBlue})`,
-    redMove ? `Opponent response: ${redMove}` : "",
+    redMove && !isPreview ? `Opponent response: ${redMove}` : "",
     capability ? `Target capability: ${capability}` : "",
+    isPreview ? "Final adjudication still processing" : "",
   ].filter((item): item is string => Boolean(item));
 
   return {
@@ -297,13 +299,29 @@ function buildDamageReport(
     confidence,
     severity,
     effect: evidence.slice(0, 2).join(" · "),
-    aftershock: ghostReasoning || counter || redMove,
-    source: "Backend turn metrics",
+    aftershock: counter || redMove,
+    source: isPreview ? "Fast backend BDA preview" : "Backend turn metrics",
     redDelta: currentRed - previousRed,
     blueCost,
     metricDeltas: deltas,
     evidence,
+    provisional: isPreview,
   };
+}
+
+function analystRead(report: DamageReport) {
+  const resource = report.resource.toLowerCase();
+  const recovery = report.recovery !== "not confirmed" ? `recovery ${report.recovery}` : "recovery unconfirmed";
+  if (report.provisional) {
+    return `Preview: ${report.damage}% effect on ${resource}; final response pending.`;
+  }
+  if (report.damage >= 50) {
+    return `Exploit now: ${report.damage}% effect, ${report.residual}% residual; ${recovery}.`;
+  }
+  if (report.damage >= 20) {
+    return `Disrupted: ${report.damage}% effect, ${report.residual}% residual; ${recovery}.`;
+  }
+  return `Limited effect: ${report.damage}% change; reassess before follow-up.`;
 }
 
 function assetPoint(scenario: string, action: Action, index: number): LatLng {
@@ -566,6 +584,20 @@ export default function GamePage() {
     }, 1900);
   };
 
+  const upsertDamageReport = (report: DamageReport) => {
+    setDamageReports(reports => {
+      if (report.provisional && reports.some(existing => existing.turn === report.turn && existing.action === report.action && !existing.provisional)) {
+        return reports;
+      }
+      const next = [
+        report,
+        ...reports.filter(existing => !(existing.turn === report.turn && existing.action === report.action)),
+      ].slice(0, 4);
+      localStorage.setItem("warbreak_damage_reports", JSON.stringify(next));
+      return next;
+    });
+  };
+
   // ── Execute turn ──────────────────────────────────────────────────────────
   const execute = async () => {
     if (busy) return;
@@ -583,6 +615,19 @@ export default function GamePage() {
     const targetOpponent = opponentAssets[matchOpponentAssetIndex(opponentAssets, act)];
     const redAsset = opponentName(targetOpponent);
     setRedUsed(r => Array.from(new Set([...r, redAsset])));
+    const turnAction = `${act.title}: ${act.desc}`;
+
+    void previewTurnBda(turnAction, metrics, turn, maxTurns)
+      .then(preview => {
+        const event = { ...latestEventFrom(preview), preview:true };
+        const previewMetrics = preview.metrics || {};
+        const projectedMetrics = Object.keys(previewMetrics).length ? { ...metrics, ...previewMetrics } : metrics;
+        const previewReport = buildDamageReport(act, targetOpponent, turn, event, metrics, projectedMetrics, maxTurns);
+        if (previewReport) upsertDamageReport(previewReport);
+      })
+      .catch(() => {
+        // The full turn request below still owns the authoritative result.
+      });
 
     let ghostReply = "";
     let metricsForStorage = metrics;
@@ -601,7 +646,6 @@ export default function GamePage() {
       }
 
       let res;
-      const turnAction = `${act.title}: ${act.desc}`;
       try {
         res = await playTurn(gid, turnAction);
       } catch (turnError) {
@@ -626,13 +670,7 @@ export default function GamePage() {
       }
       const event = latestEventFrom(res);
       const damageReport = buildDamageReport(act, targetOpponent, turn, event, metrics, metricsForStorage, maxTurns);
-      if (damageReport) {
-        setDamageReports(reports => {
-          const next = [damageReport, ...reports].slice(0, 4);
-          localStorage.setItem("warbreak_damage_reports", JSON.stringify(next));
-          return next;
-        });
-      }
+      if (damageReport) upsertDamageReport(damageReport);
       localStorage.setItem("warbreak_game", JSON.stringify(res));
     } catch {
       setToast("Live BDA pending: backend turn data unavailable.");
@@ -663,12 +701,13 @@ export default function GamePage() {
   const latestDamage = damageReports[0];
   const campaignDamage = latestDamage ? 100 - latestDamage.residual : 0;
   const pressureState =
+    latestDamage?.provisional ? "PREVIEW" :
     campaignDamage >= 72 ? "CASCADE" :
     campaignDamage >= 48 ? "DEGRADED" :
     campaignDamage >= 20 ? "DISRUPTED" :
     "INTACT";
   const followUpWindow = latestDamage
-    ? latestDamage.aftershock || `Reassess ${latestDamage.resource.toLowerCase()} inside ${latestDamage.recovery}.`
+    ? analystRead(latestDamage)
     : "Board populates after live backend adjudication returns turn metrics.";
 
   const buildFallbackPlan = (act?: Action) => {
@@ -776,6 +815,11 @@ export default function GamePage() {
                   <span><small>Recovery ETA</small><b>{latestDamage.recovery}</b></span>
                 </div>
 
+                <div className={`bda-source ${latestDamage.provisional ? "preview" : ""}`}>
+                  <span>{latestDamage.provisional ? "FAST PREVIEW" : "FINAL BDA"}</span>
+                  <b>{latestDamage.source}</b>
+                </div>
+
                 <div className="follow-window">
                   <span>ANALYST READ</span>
                   <p>{followUpWindow}</p>
@@ -802,7 +846,7 @@ export default function GamePage() {
               <>
                 <div className="damage-board-empty">
                   <b>Awaiting live BDA</b>
-                  <p>Execute a package. The board will populate only from backend turn metrics and the loaded opponent package estimate.</p>
+                  <p>Execute a package. The board paints a fast backend preview first, then upgrades to final turn metrics.</p>
                 </div>
                 <div className="damage-board-grid">
                   <span><small>Source</small><b>Backend</b></span>

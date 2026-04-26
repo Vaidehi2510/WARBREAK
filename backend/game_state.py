@@ -59,6 +59,19 @@ class TurnRequest(BaseModel):
     game_id: str
     player_action: str
 
+class BDAPreviewRequest(BaseModel):
+    player_action: str
+    turn: int = 1
+    max_turns: int = 3
+    metrics: Dict[str, int] = Field(default_factory=lambda: {
+        "intl_opinion": 50,
+        "us_domestic": 72,
+        "red_domestic": 61,
+        "allied_confidence": 58,
+        "blue_strength": 100,
+        "red_strength": 100,
+    })
+
 GAMES: dict[str, GameState] = {}
 
 def clamp_metric(value: int) -> int:

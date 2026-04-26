@@ -8,11 +8,11 @@ from pydantic import BaseModel, Field
 from typing import Any, List
 
 from extraction import FoglineAnalyzeRequest, FoglineAnalyzeResponse, analyze_plan, extract_assumptions
-from adjudication import adjudicate
+from adjudication import adjudicate, preview_adjudication
 from cascade import apply_event
 from autopsy import generate_autopsy
 from intel import generate_intel_briefing
-from game_state import GameState, NewGameRequest, TurnRequest, save_game, get_game
+from game_state import BDAPreviewRequest, GameState, NewGameRequest, TurnRequest, clamp_metric, save_game, get_game
 from llm_client import MODEL, PROVIDER, provider_status
 
 app = FastAPI(title="WARBREAK API", version="2.0.0")
@@ -136,6 +136,24 @@ def play_turn(req: TurnRequest):
     except (APIStatusError, OpenAIError, RuntimeError, json.JSONDecodeError, ValueError) as exc:
         raise ai_http_error(exc) from exc
     return save_game(apply_event(game, event))
+
+@app.post("/turn/preview")
+def preview_turn(req: BDAPreviewRequest):
+    event = preview_adjudication(req.player_action, max(1, int(req.turn or 1)))
+    metrics = dict(req.metrics or {})
+    for metric, delta in event.metric_deltas.items():
+        if metric in metrics:
+            metrics[metric] = clamp_metric(int(metrics[metric]) + int(delta))
+
+    event_data = event.model_dump() if hasattr(event, "model_dump") else event.dict()
+    event_data["preview"] = True
+    return {
+        "preview": True,
+        "turn": event.turn,
+        "max_turns": max(1, min(12, int(req.max_turns or 3))),
+        "metrics": metrics,
+        "events": [event_data],
+    }
 
 # ── Autopsy ───────────────────────────────────────────────────────────────────
 @app.get("/autopsy/{game_id}")
