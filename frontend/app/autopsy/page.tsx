@@ -48,14 +48,293 @@ const METRICS = [
 ];
 
 const TABS = [
-  "ASSUMPTIONS",
-  "DECISION LOG",
-  "GHOST COUNCIL",
-  "INFO BATTLEFIELD",
-  "FAILURE CHAIN",
-  "WHAT IF",
-  "RECOMMENDATIONS",
+  { label:"Assumption Rank", summary:"Priority order, validation moves, and cascade exposure" },
+  { label:"Decision Log", summary:"Blue moves and opponent responses by turn" },
+  { label:"Ghost Council", summary:"Adversary pressure, intent, and psychological pattern" },
+  { label:"Info Battlefield", summary:"Political, allied, domestic, and force metrics" },
+  { label:"Failure Chain", summary:"Root cause and cascade sequence" },
+  { label:"What If", summary:"Your path compared with a resilient timeline" },
+  { label:"Recommendations", summary:"Changes to make the next plan harder to break" },
 ];
+
+const FALLBACK_ASSUMPTIONS: Record<string, any[]> = {
+  "Taiwan Strait 2027": [
+    { text:"Okinawa and regional basing remain politically available when combat risk rises.", category:"alliance_access", fragility:86, criticality:0.9, cascade_effect:"Air sortie tempo and resupply options compress." },
+    { text:"PLA mobile missile batteries can be found and struck before they relocate.", category:"intelligence", fragility:84, criticality:0.88, cascade_effect:"Carrier and logistics forces must operate farther from the fight." },
+    { text:"Supply lines through the Luzon Strait stay open long enough to sustain the package.", category:"logistics", fragility:80, criticality:0.86, cascade_effect:"Forward forces lose endurance before tactical gains matter." },
+    { text:"International support survives precision strikes and escalation pressure.", category:"information", fragility:73, criticality:0.78, cascade_effect:"Allied confidence and legitimacy diverge." },
+    { text:"Carrier survivability is not the limiting condition for the operation.", category:"force_protection", fragility:70, criticality:0.82, cascade_effect:"Blue must trade operational reach for protection." },
+  ],
+  "NATO Eastern Flank": [
+    { text:"Article 5 consensus holds under gray-zone ambiguity.", category:"alliance_cohesion", fragility:88, criticality:0.92, cascade_effect:"Reinforcement authority slows while the opponent controls tempo." },
+    { text:"The Suwalki logistics corridor remains usable under pressure.", category:"logistics", fragility:83, criticality:0.88, cascade_effect:"Forward units consume readiness faster than they can be reinforced." },
+    { text:"Host nation permissions arrive before the operational window closes.", category:"permission", fragility:78, criticality:0.8, cascade_effect:"Air and missile defense coverage arrives late." },
+    { text:"Russian escalation stays below the threshold that fractures allied response.", category:"escalation", fragility:75, criticality:0.86, cascade_effect:"Political risk begins driving military timing." },
+    { text:"Forward air defense can cover the right assets at the right time.", category:"timing", fragility:69, criticality:0.76, cascade_effect:"Protected nodes become single points of failure." },
+  ],
+  "Embassy Evacuation": [
+    { text:"Civilians can reach the evacuation control point before routes close.", category:"civilian_movement", fragility:90, criticality:0.94, cascade_effect:"The mission shifts from extraction to crowd control under threat." },
+    { text:"The air corridor remains usable long enough for lift cycles.", category:"access", fragility:85, criticality:0.9, cascade_effect:"Offshore lift becomes irrelevant if aircraft cannot cycle." },
+    { text:"Roadblocks and militia patrols can be bypassed or cleared on schedule.", category:"ground_access", fragility:79, criticality:0.84, cascade_effect:"Security forces are fixed protecting routes instead of moving people." },
+    { text:"Host nation remnants stay neutral or at least predictable.", category:"partner_alignment", fragility:74, criticality:0.76, cascade_effect:"Permissions and local information become unreliable." },
+    { text:"Public messaging prevents civilians from moving to the wrong place.", category:"information", fragility:72, criticality:0.74, cascade_effect:"The evacuation plan fragments into multiple unmanaged crowds." },
+  ],
+  "Cyber Infrastructure": [
+    { text:"Attribution can be established before public retaliation pressure peaks.", category:"intelligence", fragility:84, criticality:0.84, cascade_effect:"Decision-makers may act before they know what system actually failed." },
+    { text:"Priority substations can be restored without triggering adjacent failures.", category:"infrastructure", fragility:82, criticality:0.9, cascade_effect:"Recovery work creates new outage paths." },
+    { text:"Manual procedures and backup communications are ready when networks degrade.", category:"digital_resilience", fragility:80, criticality:0.86, cascade_effect:"Command coordination slows exactly when tempo matters." },
+    { text:"The incident stays contained inside power systems rather than water and gas.", category:"cascade_risk", fragility:77, criticality:0.88, cascade_effect:"A cyber incident becomes a multi-sector public safety crisis." },
+    { text:"Public confidence holds while restoration timelines remain uncertain.", category:"information", fragility:68, criticality:0.72, cascade_effect:"Political pressure compresses technical recovery choices." },
+  ],
+};
+
+function readStoredJson(key: string, fallback: any) {
+  if (typeof window === "undefined") return fallback;
+  try {
+    const raw = localStorage.getItem(key);
+    return raw ? JSON.parse(raw) : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function validationMove(category: string) {
+  const c = String(category || "").toLowerCase();
+  if (c.includes("logistics") || c.includes("supply")) return "Set a sustainment go/no-go threshold and name the backup route.";
+  if (c.includes("alliance") || c.includes("partner") || c.includes("permission") || c.includes("access")) return "Turn external support into an explicit decision gate with an owner.";
+  if (c.includes("intelligence") || c.includes("information")) return "Define the signal that disproves the estimate before the next move.";
+  if (c.includes("digital") || c.includes("cyber") || c.includes("communication")) return "Rehearse the manual fallback and backup comms path.";
+  if (c.includes("civil")) return "Validate movement and messaging through a trusted local channel.";
+  if (c.includes("timing")) return "Add a branch for delay, early closure, and missed handoff.";
+  return "Assign an owner, a validation signal, and a branch plan.";
+}
+
+function fallbackAssumptions(scenario: string, plan: string) {
+  const seeds = FALLBACK_ASSUMPTIONS[scenario] || FALLBACK_ASSUMPTIONS["Taiwan Strait 2027"];
+  return seeds.map((item, index) => ({
+    id: `D${index + 1}`,
+    confidence: 0.55,
+    status: "untested",
+    basis: plan ? "Derived from the mission order and WARBREAK architecture fallback." : "Derived from the selected scenario.",
+    doctrine_ref: "FOGLINE-derived",
+    dependencies: index < seeds.length - 1 ? [`D${index + 2}`] : [],
+    source: "derived",
+    ...item,
+  }));
+}
+
+function rankAssumptions(raw: any[], events: any[], scenario: string, plan: string) {
+  const source = Array.isArray(raw) && raw.length ? raw : fallbackAssumptions(scenario, plan);
+  const targeted = new Map<string, number>();
+  const broken = new Map<string, number>();
+
+  events.forEach((event: any) => {
+    const target = event?.targeted_assumption_id;
+    if (target) targeted.set(target, (targeted.get(target) || 0) + 1);
+    if (Array.isArray(event?.broken_chain)) {
+      event.broken_chain.forEach((id: string) => broken.set(id, (broken.get(id) || 0) + 1));
+    }
+  });
+
+  return source.map((a: any, index: number) => {
+    const id = String(a.id || `A${index + 1}`);
+    const status = broken.has(id) ? "broken" : targeted.has(id) && a.status === "untested" ? "stressed" : (a.status || "untested");
+    const dependencyCount = Array.isArray(a.dependencies) ? a.dependencies.length : 0;
+    const statusBonus = status === "broken" ? 28 : status === "stressed" ? 18 : status === "validated" ? -8 : 8;
+    const targetBonus = Math.min(18, (targeted.get(id) || a.targeted_count || 0) * 9);
+    const brokenBonus = Math.min(12, (broken.get(id) || a.broken_chain_count || 0) * 6);
+    const rankScore = typeof a.rank_score === "number"
+      ? a.rank_score
+      : Math.max(0, Math.min(100, Math.round((Number(a.fragility) || 60) * 0.58 + (Number(a.criticality) || 0.55) * 24 + statusBonus + Math.min(14, dependencyCount * 4) + targetBonus + brokenBonus)));
+
+    return {
+      ...a,
+      id,
+      status,
+      rank_score: rankScore,
+      targeted_count: targeted.get(id) || a.targeted_count || 0,
+      broken_chain_count: broken.get(id) || a.broken_chain_count || 0,
+      validation_move: a.validation_move || validationMove(a.category),
+      rank_reason: a.rank_reason || `${status === "broken" ? "Broke during play" : status === "stressed" ? "Stressed by adversary pressure" : "Still unvalidated"}; fragility ${a.fragility ?? 60}; ${dependencyCount} linked assumption(s).`,
+    };
+  }).sort((a: any, b: any) => (b.rank_score || 0) - (a.rank_score || 0)).map((a: any, index: number) => ({ ...a, rank: index + 1 }));
+}
+
+function buildAutopsyReport(apiReport: any, scenario: string, history: any[], redUsed: string[], storedMet: any) {
+  const storedGame = readStoredJson("warbreak_game", {});
+  const plan = typeof window !== "undefined" ? localStorage.getItem("warbreak_plan") || "" : "";
+  const incoming = apiReport && typeof apiReport === "object" ? apiReport : { report: typeof apiReport === "string" ? apiReport : "" };
+  const events = Array.isArray(incoming.events) && incoming.events.length ? incoming.events : (Array.isArray(storedGame.events) ? storedGame.events : []);
+  const assumptions = rankAssumptions(
+    Array.isArray(incoming.assumptions) && incoming.assumptions.length ? incoming.assumptions : storedGame.assumptions,
+    events,
+    scenario,
+    plan,
+  );
+  const brokenCount = assumptions.filter((a: any) => a.status === "broken").length;
+  const stressedCount = assumptions.filter((a: any) => a.status === "stressed").length;
+  const rootCauses = Array.isArray(incoming.root_causes) && incoming.root_causes.length
+    ? incoming.root_causes
+    : assumptions.slice(0, 3).map((a: any) => `${a.id}: ${a.text}`);
+
+  return {
+    status: incoming.status || storedGame.status || "completed",
+    turns: incoming.turns ?? storedGame.turn ?? history.length ?? 0,
+    final_metrics: incoming.final_metrics || storedGame.metrics || storedMet,
+    assumptions,
+    events,
+    root_causes: rootCauses,
+    assumptions_broken: incoming.assumptions_broken ?? brokenCount,
+    assumptions_stressed: incoming.assumptions_stressed ?? stressedCount,
+    report: incoming.report || "",
+    lessons: incoming.lessons || [
+      "Rank assumptions by collapse risk before execution.",
+      "Treat the highest-ranked assumptions as turn-by-turn decision gates.",
+      "Build branches for the first cascade, not only the final failure.",
+    ],
+    recommendation: incoming.recommendation || `Validate or branch ${assumptions[0]?.id || "the top assumption"} before the next force commitment.`,
+    red_used: redUsed,
+  };
+}
+
+function AssumptionRankPanel({ assumptions, report }: { assumptions: any[]; report: any }) {
+  const [selectedId, setSelectedId] = useState<string | null>(assumptions[0]?.id || null);
+  const selected = assumptions.find((a: any) => a.id === selectedId) || assumptions[0];
+  const selectedScore = Number(selected?.rank_score ?? selected?.fragility ?? 0);
+  const selectedColor = selectedScore>=82?"#ff3c3c":selectedScore>=65?"#ffaa00":"#00e87a";
+  const selectedStatusColor = selected?.status==="broken"?"#ff3c3c":selected?.status==="stressed"?"#ffaa00":selected?.status==="validated"?"#00e87a":"rgba(255,255,255,0.45)";
+
+  const scoreColor = (score: number) => score>=82 ? "#ff3c3c" : score>=65 ? "#ffaa00" : "#00e87a";
+  const statusColor = (status: string) => status==="broken" ? "#ff3c3c" : status==="stressed" ? "#ffaa00" : status==="validated" ? "#00e87a" : "rgba(255,255,255,0.45)";
+
+  return (
+    <div className="assumption-rank-shell">
+      <div className="assumption-rank-summary">
+        {[
+          ["TOP RISK", assumptions[0]?.id || "N/A", assumptions[0]?.rank_score ?? "--", "#ff6644"],
+          ["BROKEN", report.assumptions_broken ?? 0, "assumptions", "#ff3c3c"],
+          ["STRESSED", report.assumptions_stressed ?? 0, "under pressure", "#ffaa00"],
+          ["SOURCE", assumptions[0]?.source === "derived" ? "DERIVED" : "FOGLINE", "rank model", "#4d9fff"],
+        ].map(([label,value,sub,color]: any, i) => (
+          <div key={i} className="assumption-rank-stat">
+            <div style={{fontSize:9,opacity:0.38,letterSpacing:"0.08em",marginBottom:5}}>{label}</div>
+            <div style={{fontSize:22,fontWeight:800,color,lineHeight:1}}>{value}</div>
+            <div style={{fontSize:10,opacity:0.42,marginTop:5}}>{sub}</div>
+          </div>
+        ))}
+      </div>
+
+      <div className="assumption-rank-grid">
+        <section className="assumption-risk-list">
+          <div className="assumption-section-head">
+            <span>RISK QUEUE</span>
+            <b>{assumptions.length} assumptions</b>
+          </div>
+          {assumptions.map((a:any,i:number)=>{
+            const score = Number(a.rank_score ?? a.fragility ?? 0);
+            const c = scoreColor(score);
+            const sColor = statusColor(a.status || "untested");
+            const isSelected = selected?.id === a.id;
+            const deps = Array.isArray(a.dependencies) ? a.dependencies.length : 0;
+            const meta = [
+              (a.status || "untested").toUpperCase(),
+              deps ? `${deps} links` : "",
+              (a.targeted_count || 0) > 0 ? `target x${a.targeted_count}` : "",
+            ].filter(Boolean).join(" / ");
+
+            return (
+              <button
+                key={a.id || i}
+                className={`assumption-risk-row ${isSelected ? "selected" : ""}`}
+                onClick={() => setSelectedId(a.id)}
+                style={{borderColor:isSelected ? `${c}80` : "rgba(255,255,255,0.08)", background:isSelected ? `${c}12` : undefined}}
+              >
+                <span className="assumption-row-rank" style={{color:c}}>
+                  {a.rank || i+1}
+                  <small>{a.id}</small>
+                </span>
+                <span className="assumption-row-main">
+                  <span className="assumption-row-title">{a.text}</span>
+                  <span className="assumption-row-meta">
+                    <i style={{background:`${sColor}18`,borderColor:`${sColor}35`,color:sColor}}>{meta}</i>
+                    <em>{String(a.category || "operational").replaceAll("_"," ")}</em>
+                  </span>
+                  <span className="assumption-row-meter">
+                    <span style={{width:`${Math.max(0,Math.min(100,score))}%`,background:c}} />
+                  </span>
+                </span>
+                <span className="assumption-row-score" style={{color:c}}>{score}</span>
+              </button>
+            );
+          })}
+        </section>
+
+        {selected && (
+          <aside className="assumption-detail">
+            <div className="assumption-detail-top">
+              <div>
+                <div className="assumption-section-head" style={{marginBottom:8}}>
+                  <span>SELECTED ASSUMPTION</span>
+                  <b>{selected.id}</b>
+                </div>
+                <h3>{selected.text}</h3>
+              </div>
+              <div className="assumption-collapse-score" style={{color:selectedColor}}>
+                <span>Collapse</span>
+                <b>{selectedScore}</b>
+              </div>
+            </div>
+
+            <div className="assumption-pill-row">
+              <span style={{background:`${selectedStatusColor}18`,borderColor:`${selectedStatusColor}35`,color:selectedStatusColor}}>
+                {(selected.status || "untested").toUpperCase()}{selected.turn_broken ? ` T${selected.turn_broken}` : ""}
+              </span>
+              <span>{String(selected.category || "operational").replaceAll("_"," ").toUpperCase()}</span>
+              {(selected.targeted_count || 0) > 0 && <span style={{color:"#ffaaa3",borderColor:"rgba(255,120,110,.22)",background:"rgba(255,60,60,.05)"}}>GHOST TARGET x{selected.targeted_count}</span>}
+            </div>
+
+            <div className="assumption-score-grid">
+              {[
+                ["Fragility", Number(selected.fragility ?? selectedScore), selectedColor],
+                ["Consequence", Math.round(Number(selected.criticality ?? 0.55) * 100), Math.round(Number(selected.criticality ?? 0.55) * 100)>=80?"#ff3c3c":"#ffaa00"],
+                ["Confidence", Math.round(Number(selected.confidence ?? 0.55) * 100), "#4d9fff"],
+              ].map(([label,val,color]: any) => (
+                <div key={label} className="assumption-score-card">
+                  <div><span>{label}</span><b style={{color}}>{val}</b></div>
+                  <i><em style={{width:`${Math.max(0,Math.min(100,Number(val)))}%`,background:color}} /></i>
+                </div>
+              ))}
+            </div>
+
+            <div className="assumption-detail-block">
+              <span>WHY IT RANKED HERE</span>
+              <p>{selected.rank_reason || selected.basis || "High planning dependency with limited validation."}</p>
+            </div>
+
+            <div className="assumption-detail-block green">
+              <span>NEXT VALIDATION MOVE</span>
+              <p>{selected.validation_move}</p>
+            </div>
+
+            {selected.cascade_effect && (
+              <div className="assumption-detail-block red">
+                <span>CASCADE IF WRONG</span>
+                <p>{selected.cascade_effect}</p>
+              </div>
+            )}
+
+            {Array.isArray(selected.dependencies) && selected.dependencies.length > 0 && (
+              <div className="assumption-dependency-row">
+                <span>LINKED ASSUMPTIONS</span>
+                <div>{selected.dependencies.map((dep: string) => <b key={dep}>{dep}</b>)}</div>
+              </div>
+            )}
+          </aside>
+        )}
+      </div>
+    </div>
+  );
+}
 
 export default function AutopsyPage() {
   const router = useRouter();
@@ -76,24 +355,21 @@ export default function AutopsyPage() {
   useEffect(() => {
     const id = localStorage.getItem("warbreak_game_id");
     if (!id || id === "local-demo") {
-      setReport({
-        status: "completed", turns: history.length || 3,
-        final_metrics: storedMet,
-        assumptions: [],
-        root_causes: redUsed.slice(0,3),
-        assumptions_broken: 2, assumptions_stressed: 1,
-        report: "",
-        lessons: [
-          "Separate assumptions from objectives before execution.",
-          "Treat high-fragility assumptions as decision gates.",
-          "Design contingency branches for logistics and alliance failure.",
-        ],
-        recommendation: "Before the next run, require one mitigation for every assumption with fragility above 70.",
-      });
+      setReport(buildAutopsyReport(null, scenario, history, redUsed, storedMet));
       setLoading(false);
       return;
     }
-    getAutopsy(id).then(setReport).catch(e => setErr(e.message)).finally(() => setLoading(false));
+    getAutopsy(id)
+      .then((data) => setReport(buildAutopsyReport(data, scenario, history, redUsed, storedMet)))
+      .catch((e) => {
+        const storedGame = readStoredJson("warbreak_game", {});
+        if (Array.isArray(storedGame.assumptions) && storedGame.assumptions.length) {
+          setReport(buildAutopsyReport(null, scenario, history, redUsed, storedMet));
+        } else {
+          setErr(e.message);
+        }
+      })
+      .finally(() => setLoading(false));
   }, []);
 
   const copy = () => {
@@ -426,22 +702,31 @@ export default function AutopsyPage() {
         )}
 
         {/* Tab bar */}
-        <div style={{display:"flex",gap:3,marginBottom:16,overflowX:"auto",paddingBottom:2}}>
-          {TABS.map((t,i)=>(
-            <button key={i} onClick={()=>setTab(i)} style={{
-              padding:"7px 13px",borderRadius:6,fontSize:10,fontWeight:700,
-              whiteSpace:"nowrap",cursor:"pointer",transition:"all 0.15s",
-              background:tab===i?"rgba(77,159,255,0.15)":"rgba(255,255,255,0.04)",
-              border:`1px solid ${tab===i?"rgba(77,159,255,0.4)":"rgba(255,255,255,0.08)"}`,
-              color:tab===i?"#4d9fff":"rgba(255,255,255,0.4)",
-              letterSpacing:"0.06em",
-            }}>{t}</button>
-          ))}
-        </div>
+        <nav className="autopsy-tab-shell" aria-label="Autopsy sections">
+          <div className="autopsy-tabs" role="tablist">
+            {TABS.map((t,i)=>(
+              <button
+                key={t.label}
+                className={`autopsy-tab ${tab===i ? "active" : ""}`}
+                onClick={()=>setTab(i)}
+                role="tab"
+                aria-selected={tab===i}
+                type="button"
+              >
+                <span className="autopsy-tab-index">{String(i + 1).padStart(2, "0")}</span>
+                <span className="autopsy-tab-label">{t.label}</span>
+              </button>
+            ))}
+          </div>
+          <div className="autopsy-tab-context">
+            <span>{TABS[tab].label}</span>
+            <b>{TABS[tab].summary}</b>
+          </div>
+        </nav>
 
         {/* Tab content */}
         <div style={{padding:"18px 20px",background:"rgba(255,255,255,0.02)",border:"1px solid rgba(255,255,255,0.07)",borderRadius:10,marginBottom:24,minHeight:200}}>
-          {tabContent[tab]}
+          {tab === 0 ? <AssumptionRankPanel assumptions={assumptions} report={report} /> : tabContent[tab]}
         </div>
 
         {/* CTAs */}
